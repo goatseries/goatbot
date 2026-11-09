@@ -24,11 +24,15 @@ def main():
         try:
             since = (datetime.fromisoformat(s["last_poll"]) - timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%SZ")
             cogs = costs.load_cogs()
-            got = shopify.orders(since)
+            got = shopify.orders(since, field="updated_at")
             keep_ids = {o["id"] for o in costs.split_wholesale(got)[0]}
             for o in got:
                 if o["id"] in s["seen"] or o["cancelledAt"]: continue
+                if (datetime.now(timezone.utc) - datetime.fromisoformat(o["createdAt"].replace("Z", "+00:00"))).days > 3:
+                    continue   # old order touched again (refund, edit): not a new sale
                 if o["id"] not in keep_ids:
+                    if o.get("displayFinancialStatus") in ("PENDING", "AUTHORIZED", "PARTIALLY_PAID", "UNPAID"):
+                        continue   # not paid yet: alert later when it is paid
                     s["seen"].append(o["id"]); continue
                 telegram.send(report.sale_message(o, cogs)); s["seen"].append(o["id"])
             s["seen"] = s["seen"][-2000:]
