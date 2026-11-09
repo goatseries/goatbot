@@ -31,3 +31,6 @@ Packaging (v6): rules in costs.json packaging_rules (first match wins). Envelope
 The bot is for the online store. Wholesale (SKU prefix 8600143252, 'wholesale' in a line title, or order tag/source 'wholesale') is excluded from revenue, costs, profit, order counts, the sale feed, /costs and /unmapped. Mixed orders: costs.json wholesale.mixed_order_rule (exclude_order default). Scoreboard shows how many wholesale orders were excluded.
 
 /breakdown shows revenue and each cost component for today (fees, products, packaging, labels, returns), orders counted, cancelled skipped, wholesale excluded. Scoreboard footer shows the code version and costs.json fingerprint; the startup log prints them too.
+
+## v12
+Revenue excludes sales tax (shipping charged stays). Only PAID and PARTIALLY_REFUNDED orders count (costs.json order_statuses). Fees: real Shopify Payments transaction fees (OrderTransaction.fees, read_orders) per order, estimate 2.9% + 0.30 on the order total when missing or when the fee query fails. Refunds exclude refunded tax. The sale feed polls by updated_at so an order alerts once it is paid.
