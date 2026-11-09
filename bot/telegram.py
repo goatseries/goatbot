@@ -71,5 +71,5 @@ def commands(offset):
         m = u.get("message") or {}
         if str((m.get("chat") or {}).get("id")) != str(_chat_id()): continue
         w = (m.get("text") or "").split("@")[0].strip().lower()
-        if w in ("/t", "/y", "/w", "/m", "/costs"): out.append(w[1:])
+        if w in ("/t", "/y", "/w", "/m", "/costs", "/unmapped", "/breakdown"): out.append(w[1:])
     return offset, out
