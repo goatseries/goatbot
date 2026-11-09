@@ -1,8 +1,14 @@
-import time, json, os
+import time, json, os, re
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from . import config as c, shopify, telegram, report, costs
 STATE = os.environ.get("STATE_PATH", "state.json")  # use a Railway volume for persistence
+def redact(msg):
+    for k in ("TELEGRAM_BOT_TOKEN", "SHOPIFY_ADMIN_TOKEN", "SHOPIFY_CLIENT_SECRET", "SHOPIFY_CLIENT_ID", "META_ACCESS_TOKEN", "KLAVIYO_API_KEY"):
+        v = os.environ.get(k)
+        if v: msg = msg.replace(v, "[REDACTED]")
+    msg = re.sub(r"shp(?:at|ca|ss)_[A-Za-z0-9]+", "[REDACTED]", msg)
+    return re.sub(r"bot\d+:[A-Za-z0-9_-]+", "bot[REDACTED]", re.sub(r"access_token=[^&\s]+", "access_token=[REDACTED]", msg))
 def load():
     try: return json.load(open(STATE))
     except Exception: return {"seen": [], "last_poll": None, "sent_slots": []}
@@ -31,6 +37,6 @@ def main():
             for p_ in reqs: telegram.send(report.scoreboard(p_))
             save(s)
         except Exception as e:
-            print("error:", repr(e))
+            print("error:", redact(type(e).__name__ + ": " + str(e)))
         time.sleep(c.POLL)
 if __name__ == "__main__": main()
