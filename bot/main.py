@@ -15,6 +15,8 @@ def load():
 def save(s): json.dump(s, open(STATE, "w"))
 def main():
     s = load()
+    from .version import VERSION
+    print("starting", VERSION, "costs.json", costs.config_tag())
     if not c.DRY_RUN: telegram.startup_check()
     if not s["last_poll"]:
         s["last_poll"] = datetime.now(timezone.utc).isoformat()
@@ -43,6 +45,7 @@ def main():
                 if p_ == "costs":
                     csv_text, n, n_no, n_un = report.costs_template()
                     telegram.send_document("cost-mapping.csv", csv_text, f"{n} products/variants from the last {c.COSTS_DAYS} days; {n_un} are not mapped in costs.json, {n_no} have no Shopify cost per item set. Add the unmapped ones to costs.json.")
+                elif p_ == "breakdown": telegram.send(report.breakdown())
                 elif p_ == "unmapped": telegram.send(report.unmapped_report())
                 else: telegram.send(report.scoreboard(p_))
             save(s)
