@@ -27,19 +27,31 @@ Q = """
 query($q:String!,$after:String){orders(first:25,after:$after,query:$q,sortKey:CREATED_AT){
  pageInfo{hasNextPage endCursor}
  nodes{id name createdAt test cancelledAt tags sourceName
-  totalPriceSet{shopMoney{amount}} totalRefundedSet{shopMoney{amount}}
+  displayFinancialStatus totalPriceSet{shopMoney{amount}} totalTaxSet{shopMoney{amount}} currentTotalTaxSet{shopMoney{amount}} totalRefundedSet{shopMoney{amount}}
+  transactions(first:10){kind status gateway fees{amount{amount} taxAmount{amount}}}
   totalShippingPriceSet{shopMoney{amount}}
   customer{numberOfOrders}
   customerJourneySummary{lastVisit{utmParameters{source medium campaign content}}}
   lineItems(first:25){nodes{sku title name variantTitle product{title productType tags} quantity originalUnitPriceSet{shopMoney{amount}} variant{id title sku price inventoryItem{unitCost{amount}}}}}
  }}}"""
-def orders(since_iso, until_iso=None):
-    """All non-test orders created in [since, until]. Needs read_orders."""
-    q = f"created_at:>='{since_iso}'" + (f" created_at:<='{until_iso}'" if until_iso else "")
+_LEAN = None
+def _lean(q):
+    """Same query without the transactions/fees block (fallback)."""
+    i = q.index("  transactions(first:10)"); j = q.index("\n", i)
+    return q[:i] + q[j + 1:]
+_fees_ok = {"v": True}
+def orders(since_iso, until_iso=None, field="created_at"):
+    """All non-test orders with `field` (created_at or updated_at) in [since, until]. Needs read_orders.
+    If the fee block errors, retries once without it and logs a one-line safe message."""
+    q = f"{field}:>='{since_iso}'" + (f" {field}:<='{until_iso}'" if until_iso else "")
     out, after = [], None
     while True:
-        j = _post({"query": Q, "variables": {"q": q, "after": after}})
-        if "errors" in j: raise RuntimeError(j["errors"])
+        query = Q if _fees_ok["v"] else _lean(Q)
+        j = _post({"query": query, "variables": {"q": q, "after": after}})
+        if "errors" in j and _fees_ok["v"]:
+            print("shopify: order query with transaction fees failed, using fee estimate: " + str(j["errors"])[:200])
+            _fees_ok["v"] = False; out, after = [], None; continue
+        if "errors" in j: raise RuntimeError(str(j["errors"])[:300])
         d = j["data"]["orders"]
         out += [o for o in d["nodes"] if not o["test"]]
         if not d["pageInfo"]["hasNextPage"]: return out
