@@ -19,3 +19,8 @@ Per line item: cogs.csv (sku,cogs) overrides first, else Shopify inventory item 
 
 ## Shipping cost (limit)
 Shopify's Admin API does not expose the Shopify Shipping label cost per order (checked Nov 2026). Balance-transaction label types exist only for Managed Markets, and label charges are not linked to orders. So shipping uses DEFAULT_SHIPPING_COST (flat per order) until labels move to an app with an API (ShipStation, Shippo, EasyPost). Profit stays "provisional" while it is 0.
+
+## costs.json (v4)
+COGS per unit, packaging, and label cost by number of books live in costs.json (repo root, edit and redeploy). Order cost = unit costs + packaging box + label; label uses the book-count table, with linear interpolation for counts not listed and a per-book extrapolation above the top tier (both flagged as estimates). /costs sends cost-mapping.csv listing every variant sold recently with mapped yes/no, cost used and Shopify cost status. Every assumption (estimated tiers, assumed packaging rule, non-book shipping, bundle costs, unmapped items) adds a note and keeps profit "provisional". Legacy cogs.csv and Shopify cost per item are still fallbacks for unmapped items.
+
+Packaging (v6): rules in costs.json packaging_rules (first match wins). Envelope for 1-2 book orders, 4-book bundles and gift sets get a gift box inside an outer bundle box (both costs added), bundle box alone for 3 and 5+ books (assumed, flagged).
