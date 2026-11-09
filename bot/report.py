@@ -23,6 +23,25 @@ def _range(period):
     if period == "m":
         return d0.replace(day=1), None, "This Month", now
     return d0, None, "Today", now
+def _titles(d, cap=10):
+    ks = sorted(d, key=lambda k: -d[k]); out = "; ".join(ks[:cap])
+    return out + (f" (+{len(ks) - cap} more)" if len(ks) > cap else "")
+def unmapped_report(days=None):
+    """Titles/SKUs matching no costs.json item (even if the book default covers them). No figures."""
+    days = days or c.COSTS_DAYS
+    since = (datetime.now(ZoneInfo("UTC")) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    cfg = costs.load_config(); seen = {}
+    for o in costs.split_wholesale(shopify.orders(since))[0]:
+        for li in o["lineItems"]["nodes"]:
+            if costs.classify(li, cfg): continue
+            sku, texts, ptype, tags = costs.fields(li); p = li.get("product") or {}
+            _, is_def = costs.resolve(li, cfg)
+            key = (costs.display(li), sku)
+            seen[key] = f"- {costs.display(li)} | sku: {sku or '-'} | type: {p.get('productType') or '-'} | tags: {', '.join(p.get('tags') or []) or '-'} | {'default book' if is_def else 'NO MATCH'}"
+    if not seen: return f"All products from the last {days} days match costs.json."
+    lines = sorted(seen.values())
+    txt = f"Not matched in costs.json ({len(lines)}), last {days} days:\n" + "\n".join(lines)
+    return txt[:3900]
 def _subs_line(period, start, end, now):
     """New Klaviyo profiles. Today/yesterday compare with the previous day. Empty string on any failure."""
     try:
@@ -40,14 +59,17 @@ def scoreboard(period="t"):
     start, end, label, now = _range(period)
     utc = ZoneInfo("UTC"); f = "%Y-%m-%dT%H:%M:%SZ"
     os_ = shopify.orders(start.astimezone(utc).strftime(f), end.astimezone(utc).strftime(f) if end else None)
+    os_, n_ws = costs.split_wholesale(os_)
     cogs = costs.load_cogs()
     t = dict(revenue=0, fees=0, cogs=0, shipping=0, returns=0)
     n_ok = n_miss = lines = lines_miss = 0
-    tagc = {}
+    tagc = {}; unm = {}; asm = {}
     for o in os_:
         if o["cancelledAt"]: continue
         k = costs.order_costs(o, cogs)
         for x in t: t[x] += k[x]
+        for t_ in k["unmapped"]: unm[t_] = unm.get(t_, 0) + 1
+        for t_ in k["assumed_books"]: asm[t_] = asm.get(t_, 0) + 1
         for tg in k["tags"]: tagc[tg] = tagc.get(tg, 0) + 1
         lines += k["lines"]; lines_miss += len(k["missing_cogs"])
         if k["missing_cogs"]: n_miss += 1
@@ -60,13 +82,16 @@ def scoreboard(period="t"):
     subs = _subs_line(period, start, end, now)
     prov = n_miss > 0 or bool(tagc)
     notes = []
+    ws_note = f"\nℹ️ {n_ws} wholesale order(s) excluded" if n_ws else ""
     if n_miss: notes.append(f"cost missing on {lines_miss} of {lines} line items in {n_miss} of {n_ok + n_miss} orders (counted as $0)")
     notes += [f"{k} ({v} orders)" for k, v in sorted(tagc.items())]
+    if unm: notes.append("not in costs.json: " + _titles(unm))
+    if asm: notes.append("assumed to be books: " + _titles(asm))
     note = ("\n⚠️ Provisional: " + "; ".join(notes)) if prov else ""
     tag = " (provisional)" if prov else ""
     return (f"📊 {label} Scoreboard\nAs of {now.strftime('%b %-d, %-I:%M %p')} ET\n\n"
         f"💰 Profit{tag} ${profit:,.0f} ({roi:.1f}% ROI)\n💵 Revenue ${t['revenue']:,.0f} ({roas:.2f}x)\n"
-        f"💸 Ads ${ads:,.0f} · Costs ${costs_total:,.0f}\n💳 Orders {len(os_)}{subs}{note}")
+        f"💸 Ads ${ads:,.0f} · Costs ${costs_total:,.0f}\n💳 Orders {len(os_)}{subs}{ws_note}{note}")
 def creative_report(days=7):
     tz = ZoneInfo(c.TZ); end = datetime.now(tz); start = end - timedelta(days=days - 1)
     os_ = shopify.orders((start.replace(hour=0, minute=0, second=0).astimezone(ZoneInfo("UTC"))).strftime("%Y-%m-%dT%H:%M:%SZ"))
@@ -87,10 +112,10 @@ def costs_template(days=None):
     days = days or c.COSTS_DAYS
     since = (datetime.now(ZoneInfo("UTC")) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
     cfg = costs.load_config(); cogs = costs.load_cogs(); rows = {}
-    for o in shopify.orders(since):
+    for o in costs.split_wholesale(shopify.orders(since))[0]:
         for li in o["lineItems"]["nodes"]:
             k = costs.line_key(li); v = li.get("variant") or {}
-            it = costs.classify(li, cfg); u = costs.unit_cost(li, cogs, cfg)
+            it = costs.classify(li, cfg); u = costs.unit_cost(li, cogs, cfg)  # noqa
             sc = (((v.get("inventoryItem") or {}).get("unitCost") or {}).get("amount") or "")
             r = rows.setdefault(k, {"sku": k, "title": li["title"] + (f" - {v['title']}" if v.get("title") and v["title"] != "Default Title" else ""),
                 "price": v.get("price") or li["originalUnitPriceSet"]["shopMoney"]["amount"],
