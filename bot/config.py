@@ -23,3 +23,5 @@ FEE_FIXED = float(env("SHOPIFY_FEE_FIXED", "0.30"))
 SHIP_DEFAULT = float(env("DEFAULT_SHIPPING_COST", "0"))
 DRY_RUN = env("DRY_RUN", "1") == "1"
 COSTS_DAYS = int(env("COSTS_DAYS", "90"))
+WEEKLY_DAY = env("WEEKLY_RECAP_DAY", "MON").upper()[:3]
+WEEKLY_TIME = env("WEEKLY_RECAP_TIME", "08:00")
