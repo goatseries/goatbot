@@ -10,11 +10,45 @@ def redact(msg):
     msg = re.sub(r"shp(?:at|ca|ss)_[A-Za-z0-9]+", "[REDACTED]", msg)
     return re.sub(r"bot\d+:[A-Za-z0-9_-]+", "bot[REDACTED]", re.sub(r"access_token=[^&\s]+", "access_token=[REDACTED]", msg))
 def load():
-    try: return json.load(open(STATE))
-    except Exception: return {"seen": [], "last_poll": None, "sent_slots": []}
-def save(s): json.dump(s, open(STATE, "w"))
+    try: s = json.load(open(STATE))
+    except Exception: s = {}
+    s.setdefault("seen", []); s.setdefault("pending", []); s.setdefault("last_poll", None); s.setdefault("sent_slots", [])
+    return s
+def save(s):
+    """Atomic write: temp file in the same directory, fsync, rename."""
+    tmp = STATE + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(s, f); f.flush(); os.fsync(f.fileno())
+    os.replace(tmp, STATE)
+def check_state_path():
+    d = os.path.dirname(os.path.abspath(STATE))
+    try:
+        os.makedirs(d, exist_ok=True)
+        t = os.path.join(d, ".write_test"); open(t, "w").write("x"); os.remove(t)
+    except Exception as e:
+        print(f"WARNING: state path {STATE} is not writable ({type(e).__name__}); alerts may repeat after restarts"); return
+    if not (os.path.ismount(d) or os.stat(d).st_dev != os.stat("/").st_dev):
+        print(f"WARNING: {STATE} is not on a mounted volume. State is lost on every redeploy, which can re-send old alerts. Mount a Railway volume and set STATE_PATH=/data/state.json")
+    else:
+        print(f"state path {STATE} is on a mounted volume")
+def new_sale_decision(o, s, keep_ids, max_age_h):
+    """Returns 'alert', 'seed' (mark seen silently) or 'skip' (leave for later)."""
+    if o["id"] in s["seen"]: return "skip"
+    if o["cancelledAt"]: return "seed" if o["id"] not in s["pending"] else "skip"
+    age_h = (datetime.now(timezone.utc) - datetime.fromisoformat(o["createdAt"].replace("Z", "+00:00"))).total_seconds() / 3600
+    st = o.get("displayFinancialStatus")
+    if st in ("PENDING", "AUTHORIZED", "PARTIALLY_PAID", "UNPAID"):
+        if age_h <= 24 * 7 and o["id"] not in s["pending"]: s["pending"].append(o["id"])
+        return "skip"
+    if o["id"] not in keep_ids: return "seed"         # wholesale, voided, refunded etc.
+    if age_h <= max_age_h: return "alert"              # genuinely new order
+    if o["id"] in s["pending"]: return "alert"         # we saw it unpaid and it has since been paid
+    return "seed"                                      # older order that was just touched: never alert
 def main():
     s = load()
+    fresh = not s["last_poll"]
+    check_state_path()
+    print(f"state: {len(s['seen'])} seen orders, last_poll {s['last_poll']}" + (" (NO SAVED STATE: new deploy or no volume at STATE_PATH=" + STATE + ")" if fresh else ""))
     from .version import VERSION
     print("starting", VERSION, "costs.json", costs.config_tag())
     if not c.DRY_RUN: telegram.startup_check()
@@ -22,20 +56,22 @@ def main():
         s["last_poll"] = datetime.now(timezone.utc).isoformat()
     while True:
         try:
-            since = (datetime.fromisoformat(s["last_poll"]) - timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%SZ")
+            since = (datetime.fromisoformat(s["last_poll"]) - timedelta(minutes=0 if fresh else 5)).strftime("%Y-%m-%dT%H:%M:%SZ")
             cogs = costs.load_cogs()
             got = shopify.orders(since, field="updated_at")
             keep_ids = {o["id"] for o in costs.split_wholesale(got)[0]}
+            max_age_h = float(os.environ.get("ALERT_MAX_AGE_HOURS", "6"))
             for o in got:
-                if o["id"] in s["seen"] or o["cancelledAt"]: continue
-                if (datetime.now(timezone.utc) - datetime.fromisoformat(o["createdAt"].replace("Z", "+00:00"))).days > 3:
-                    continue   # old order touched again (refund, edit): not a new sale
-                if o["id"] not in keep_ids:
-                    if o.get("displayFinancialStatus") in ("PENDING", "AUTHORIZED", "PARTIALLY_PAID", "UNPAID"):
-                        continue   # not paid yet: alert later when it is paid
-                    s["seen"].append(o["id"]); continue
-                telegram.send(report.sale_message(o, cogs)); s["seen"].append(o["id"])
-            s["seen"] = s["seen"][-2000:]
+                d = new_sale_decision(o, s, keep_ids, max_age_h)
+                if d == "alert":
+                    telegram.send(report.sale_message(o, cogs))
+                    print(f"alert: order {o.get('name')} id {o['id'].split('/')[-1]} status {o.get('displayFinancialStatus')} source {o.get('sourceName')} created {o.get('createdAt')} updated {o.get('updatedAt')}")
+                if d in ("alert", "seed"):
+                    s["seen"].append(o["id"])
+                    if o["id"] in s["pending"]: s["pending"].remove(o["id"])
+                    if d == "seed": print(f"seeded (no alert): order {o.get('name')} status {o.get('displayFinancialStatus')} created {o.get('createdAt')} updated {o.get('updatedAt')}")
+                    save(s)   # persist right after each alert/seed
+            s["seen"] = s["seen"][-5000:]; s["pending"] = s["pending"][-500:]
             s["last_poll"] = datetime.now(timezone.utc).isoformat()
             now = datetime.now(ZoneInfo(c.TZ)); today = now.strftime("%Y-%m-%d")
             for t in c.TIMES:
@@ -50,6 +86,7 @@ def main():
                     csv_text, n, n_no, n_un = report.costs_template()
                     telegram.send_document("cost-mapping.csv", csv_text, f"{n} products/variants from the last {c.COSTS_DAYS} days; {n_un} are not mapped in costs.json, {n_no} have no Shopify cost per item set. Add the unmapped ones to costs.json.")
                 elif p_ == "breakdown": telegram.send(report.breakdown())
+                elif p_.startswith("order "): telegram.send(report.explain_order(p_.split(" ", 1)[1], set(s["seen"])))
                 elif p_ == "unmapped": telegram.send(report.unmapped_report())
                 else: telegram.send(report.scoreboard(p_))
             save(s)
