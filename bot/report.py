@@ -5,14 +5,48 @@ from . import config as c, shopify, meta, costs, klaviyo
 def _utm(o):
     v = ((o.get("customerJourneySummary") or {}).get("lastVisit") or {}).get("utmParameters") or {}
     return v
+def _when(iso):
+    try: return datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone(ZoneInfo(c.TZ)).strftime("%b %-d %-I:%M %p ET")
+    except Exception: return iso or "?"
 def sale_message(o, cogs):
     k = costs.order_costs(o, cogs); u = _utm(o)
-    first = (o.get("customer") or {}).get("numberOfOrders") in (None, "0", "1", 1, 0)
-    lines = [f"💰 NEW SALE — ${k['revenue']:.2f}", "",
+    lines = [f"💰 NEW SALE — ${k['revenue']:.2f} (excl. tax)", "",
+        f"🧾 {o.get('name', '?')} · {o.get('sourceName') or 'unknown source'} · {o.get('displayFinancialStatus', '?')}",
+        f"🕒 created {_when(o.get('createdAt'))}", "",
         "🛒 " + ", ".join(f"{l['title']} x{l['quantity']}" for l in o["lineItems"]["nodes"])]
     if u.get("source"): lines.append(f"📣 {u['source']}" + (f"  🎨 {u['content']}" if u.get("content") else ""))
     if u.get("campaign"): lines.append(f"📱 {u['campaign']}")
     return "\n".join(lines)
+def explain_order(name, seen=()):
+    """Debug text for one order: would it be counted, and would the sale feed alert on it. No customer details."""
+    found = shopify.find_order(name)
+    if not found: return f"No order found for name #{str(name).lstrip('#')} (check the number; the lookup uses Shopify's order name)."
+    out = []
+    for o in found:
+        why = []
+        if o.get("test"): why.append("test order")
+        if o.get("cancelledAt"): why.append("cancelled")
+        allowed = {x.upper() for x in costs.load_config().get("order_statuses", ["PAID", "PARTIALLY_REFUNDED"])}
+        st = o.get("displayFinancialStatus")
+        if st and st not in allowed: why.append(f"status {st} not counted")
+        if not costs.filter_status([o]): pass
+        kept, n_ws = costs.split_wholesale([o])
+        if n_ws: why.append("wholesale (sku/title/tag/source rule)")
+        age_days = (datetime.now(ZoneInfo("UTC")) - datetime.fromisoformat(o["createdAt"].replace("Z", "+00:00"))).days
+        counted = not why
+        feed = "already alerted" if o["id"] in seen else ("would alert on its next update" if counted and age_days <= 3 else
+               ("not alerted: " + ("; ".join(why) if why else f"created {age_days} days ago (feed only alerts on orders under 3 days old)")))
+        try:
+            k = costs.order_costs(o, costs.load_cogs()); amt = f"total incl. tax ${k['revenue'] + k['tax']:.2f}, net of tax ${k['revenue']:.2f}"
+        except Exception: amt = "amount unavailable"
+        out.append("\n".join([
+            f"🔎 Order {o.get('name')} (confirmation {o.get('confirmationNumber') or 'n/a'})",
+            f"Source: {o.get('sourceName') or 'unknown'} · status {st} · created {_when(o.get('createdAt'))} · updated {_when(o.get('updatedAt'))}",
+            f"Archived/closed: {'yes' if o.get('closed') else 'no'} · cancelled: {'yes' if o.get('cancelledAt') else 'no'} · test: {'yes' if o.get('test') else 'no'} · tags: {', '.join(o.get('tags') or []) or '-'}",
+            f"Amounts: {amt}",
+            f"Counted in scoreboards: {'YES' if counted else 'NO - ' + '; '.join(why)}",
+            f"Sale feed: {feed}"]))
+    return "\n\n".join(out)[:3900]
 def _range(period):
     tz = ZoneInfo(c.TZ); now = datetime.now(tz)
     d0 = now.replace(hour=0, minute=0, second=0, microsecond=0)
