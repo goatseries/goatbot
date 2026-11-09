@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+from .version import VERSION
 from . import config as c, shopify, meta, costs, klaviyo
 def _utm(o):
     v = ((o.get("customerJourneySummary") or {}).get("lastVisit") or {}).get("utmParameters") or {}
@@ -11,7 +12,6 @@ def sale_message(o, cogs):
         "🛒 " + ", ".join(f"{l['title']} x{l['quantity']}" for l in o["lineItems"]["nodes"])]
     if u.get("source"): lines.append(f"📣 {u['source']}" + (f"  🎨 {u['content']}" if u.get("content") else ""))
     if u.get("campaign"): lines.append(f"📱 {u['campaign']}")
-    if k["missing_cogs"]: lines.append("⚠️ missing COGS: " + ", ".join(k["missing_cogs"]))
     return "\n".join(lines)
 def _range(period):
     tz = ZoneInfo(c.TZ); now = datetime.now(tz)
@@ -61,7 +61,7 @@ def scoreboard(period="t"):
     os_ = shopify.orders(start.astimezone(utc).strftime(f), end.astimezone(utc).strftime(f) if end else None)
     os_, n_ws = costs.split_wholesale(os_)
     cogs = costs.load_cogs()
-    t = dict(revenue=0, fees=0, cogs=0, shipping=0, returns=0)
+    t = dict(revenue=0, fees=0, cogs=0, shipping=0, returns=0, units_cost=0, packaging=0)
     n_ok = n_miss = lines = lines_miss = 0
     tagc = {}; unm = {}; asm = {}
     for o in os_:
@@ -80,18 +80,10 @@ def scoreboard(period="t"):
     roi = profit / (ads + costs_total) * 100 if (ads + costs_total) else 0
     roas = t["revenue"] / ads if ads else 0
     subs = _subs_line(period, start, end, now)
-    prov = n_miss > 0 or bool(tagc)
-    notes = []
     ws_note = f"\nℹ️ {n_ws} wholesale order(s) excluded" if n_ws else ""
-    if n_miss: notes.append(f"cost missing on {lines_miss} of {lines} line items in {n_miss} of {n_ok + n_miss} orders (counted as $0)")
-    notes += [f"{k} ({v} orders)" for k, v in sorted(tagc.items())]
-    if unm: notes.append("not in costs.json: " + _titles(unm))
-    if asm: notes.append("assumed to be books: " + _titles(asm))
-    note = ("\n⚠️ Provisional: " + "; ".join(notes)) if prov else ""
-    tag = " (provisional)" if prov else ""
     return (f"📊 {label} Scoreboard\nAs of {now.strftime('%b %-d, %-I:%M %p')} ET\n\n"
-        f"💰 Profit{tag} ${profit:,.0f} ({roi:.1f}% ROI)\n💵 Revenue ${t['revenue']:,.0f} ({roas:.2f}x)\n"
-        f"💸 Ads ${ads:,.0f} · Costs ${costs_total:,.0f}\n💳 Orders {len(os_)}{subs}{ws_note}{note}")
+        f"💰 Profit ${profit:,.0f} ({roi:.1f}% ROI)\n💵 Revenue ${t['revenue']:,.0f} ({roas:.2f}x)\n"
+        f"💸 Ads ${ads:,.0f} · Costs ${costs_total:,.0f}\n💳 Orders {len(os_)}{subs}{ws_note}\n🔧 {VERSION} · costs.json {costs.config_tag()}")
 def creative_report(days=7):
     tz = ZoneInfo(c.TZ); end = datetime.now(tz); start = end - timedelta(days=days - 1)
     os_ = shopify.orders((start.replace(hour=0, minute=0, second=0).astimezone(ZoneInfo("UTC"))).strftime("%Y-%m-%dT%H:%M:%SZ"))
@@ -129,3 +121,22 @@ def costs_template(days=None):
     vals = rows.values()
     return (buf.getvalue(), len(rows), sum(1 for r in vals if r["shopify_cost_set"] == "no"),
             sum(1 for r in vals if r["mapped_in_costs_json"] == "no"))
+
+def breakdown(period="t"):
+    """Cost components for a period (for tracing differences between readings). Costs line = fees + product cost + packaging + labels + returns (ad spend is separate)."""
+    start, end, label, now = _range(period)
+    utc = ZoneInfo("UTC"); f = "%Y-%m-%dT%H:%M:%SZ"
+    os_ = shopify.orders(start.astimezone(utc).strftime(f), end.astimezone(utc).strftime(f) if end else None)
+    n_all = len(os_); os_, n_ws = costs.split_wholesale(os_)
+    cogs = costs.load_cogs(); t = dict(revenue=0, fees=0, units_cost=0, packaging=0, shipping=0, returns=0); n = n_can = n_un = 0
+    for o in os_:
+        if o["cancelledAt"]: n_can += 1; continue
+        k = costs.order_costs(o, cogs); n += 1; n_un += len(k["missing_cogs"])
+        for x in t: t[x] += k[x]
+    tot = t["fees"] + t["units_cost"] + t["packaging"] + t["shipping"] + t["returns"]
+    return (f"🔎 {label} breakdown ({VERSION}, costs.json {costs.config_tag()})\n"
+        f"Window start {start.strftime('%b %-d %-I:%M %p')} ET, as of {now.strftime('%-I:%M %p')} ET\n"
+        f"Orders counted {n} · cancelled skipped {n_can} · wholesale excluded {n_ws} · fetched {n_all}\n"
+        f"Revenue ${t['revenue']:,.2f}\nFees ${t['fees']:,.2f} · Products ${t['units_cost']:,.2f} · Packaging ${t['packaging']:,.2f}\n"
+        f"Labels ${t['shipping']:,.2f} · Returns ${t['returns']:,.2f}\nCosts total ${tot:,.2f} (ads not included)\n"
+        f"Line items without a cost: {n_un} (see /unmapped)")
