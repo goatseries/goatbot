@@ -80,6 +80,14 @@ def main():
                     telegram.send(report.scoreboard())
                     # creative report disabled in v1: report.creative_report()
                     s["sent_slots"] = (s["sent_slots"] + [slot])[-20:]
+            now_w = datetime.now(ZoneInfo(c.TZ)); wk = (now_w - timedelta(days=now_w.weekday())).strftime("%Y-%m-%d")
+            days = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"]
+            if (days.index(c.WEEKLY_DAY) if c.WEEKLY_DAY in days else 0) == now_w.weekday() and now_w.strftime("%H:%M") >= c.WEEKLY_TIME \
+               and wk not in s.setdefault("weekly_sent", []) and time.time() > s.get("weekly_retry_after", 0):
+                try:
+                    telegram.send(report.weekly_recap()); s["weekly_sent"] = (s["weekly_sent"] + [wk])[-10:]; save(s)
+                except Exception as e:
+                    print("weekly recap error:", redact(type(e).__name__ + ": " + str(e))); s["weekly_retry_after"] = time.time() + 600
             s["tg_offset"], reqs = telegram.commands(s.get("tg_offset", 0))
             for p_ in reqs:
                 if p_ == "costs":
@@ -87,6 +95,7 @@ def main():
                     telegram.send_document("cost-mapping.csv", csv_text, f"{n} products/variants from the last {c.COSTS_DAYS} days; {n_un} are not mapped in costs.json, {n_no} have no Shopify cost per item set. Add the unmapped ones to costs.json.")
                 elif p_ == "breakdown": telegram.send(report.breakdown())
                 elif p_.startswith("order "): telegram.send(report.explain_order(p_.split(" ", 1)[1], set(s["seen"])))
+                elif p_ == "week": telegram.send(report.weekly_recap())
                 elif p_ == "unmapped": telegram.send(report.unmapped_report())
                 else: telegram.send(report.scoreboard(p_))
             save(s)
