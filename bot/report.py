@@ -43,10 +43,12 @@ def scoreboard(period="t"):
     cogs = costs.load_cogs()
     t = dict(revenue=0, fees=0, cogs=0, shipping=0, returns=0)
     n_ok = n_miss = lines = lines_miss = 0
+    tagc = {}
     for o in os_:
         if o["cancelledAt"]: continue
         k = costs.order_costs(o, cogs)
         for x in t: t[x] += k[x]
+        for tg in k["tags"]: tagc[tg] = tagc.get(tg, 0) + 1
         lines += k["lines"]; lines_miss += len(k["missing_cogs"])
         if k["missing_cogs"]: n_miss += 1
         else: n_ok += 1
@@ -56,10 +58,10 @@ def scoreboard(period="t"):
     roi = profit / (ads + costs_total) * 100 if (ads + costs_total) else 0
     roas = t["revenue"] / ads if ads else 0
     subs = _subs_line(period, start, end, now)
-    prov = n_miss > 0 or c.SHIP_DEFAULT == 0
+    prov = n_miss > 0 or bool(tagc)
     notes = []
     if n_miss: notes.append(f"cost missing on {lines_miss} of {lines} line items in {n_miss} of {n_ok + n_miss} orders (counted as $0)")
-    if c.SHIP_DEFAULT == 0: notes.append("shipping not included yet")
+    notes += [f"{k} ({v} orders)" for k, v in sorted(tagc.items())]
     note = ("\n⚠️ Provisional: " + "; ".join(notes)) if prov else ""
     tag = " (provisional)" if prov else ""
     return (f"📊 {label} Scoreboard\nAs of {now.strftime('%b %-d, %-I:%M %p')} ET\n\n"
@@ -80,20 +82,25 @@ def creative_report(days=7):
     return "\n".join(lines)
 
 def costs_template(days=None):
-    """CSV text: one row per variant seen in recent orders. Fill the cogs column to override Shopify cost."""
+    """CSV text: one row per variant seen in recent orders, with mapping status. Returns (csv, n, n_no_shopify_cost, n_unmapped)."""
     import csv, io
     days = days or c.COSTS_DAYS
     since = (datetime.now(ZoneInfo("UTC")) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    rows = {}
+    cfg = costs.load_config(); cogs = costs.load_cogs(); rows = {}
     for o in shopify.orders(since):
         for li in o["lineItems"]["nodes"]:
             k = costs.line_key(li); v = li.get("variant") or {}
-            r = rows.setdefault(k, {"sku": k, "cogs": "", "title": li["title"] + (f" - {v['title']}" if v.get("title") and v["title"] != "Default Title" else ""),
+            it = costs.classify(li, cfg); u = costs.unit_cost(li, cogs, cfg)
+            sc = (((v.get("inventoryItem") or {}).get("unitCost") or {}).get("amount") or "")
+            r = rows.setdefault(k, {"sku": k, "title": li["title"] + (f" - {v['title']}" if v.get("title") and v["title"] != "Default Title" else ""),
                 "price": v.get("price") or li["originalUnitPriceSet"]["shopMoney"]["amount"],
-                "shopify_unit_cost": (((v.get("inventoryItem") or {}).get("unitCost") or {}).get("amount") or ""), "units_sold": 0})
-            r["shopify_cost_set"] = "yes" if r["shopify_unit_cost"] != "" else "no"
+                "shopify_unit_cost": sc, "shopify_cost_set": "yes" if sc != "" else "no",
+                "mapped_in_costs_json": "yes" if it else "no", "item_type": (it or {}).get("type", ""),
+                "books_per_unit": costs.books_in(li, it) if it else "", "cost_used": "" if u is None else f"{u:.2f}", "units_sold": 0})
             r["units_sold"] += li["quantity"]
-    buf = io.StringIO(); w = csv.DictWriter(buf, fieldnames=["sku", "cogs", "title", "price", "shopify_unit_cost", "shopify_cost_set", "units_sold"])
+    buf = io.StringIO(); w = csv.DictWriter(buf, fieldnames=["sku", "title", "price", "shopify_unit_cost", "shopify_cost_set", "mapped_in_costs_json", "item_type", "books_per_unit", "cost_used", "units_sold"])
     w.writeheader()
     for r in sorted(rows.values(), key=lambda r: -r["units_sold"]): w.writerow(r)
-    return buf.getvalue(), len(rows), sum(1 for r in rows.values() if r["shopify_cost_set"] == "no")
+    vals = rows.values()
+    return (buf.getvalue(), len(rows), sum(1 for r in vals if r["shopify_cost_set"] == "no"),
+            sum(1 for r in vals if r["mapped_in_costs_json"] == "no"))
