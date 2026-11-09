@@ -31,6 +31,15 @@ def send(text, parse_mode=None):
         print(msg)
         raise RuntimeError(msg)
 
+def send_document(filename, content, caption=""):
+    if c.DRY_RUN:
+        print(f"[DRY_RUN] document {filename}\n" + content[:500]); return
+    r = requests.post(f"https://api.telegram.org/bot{c.TG_TOKEN()}/sendDocument",
+        data={"chat_id": _chat_id(), "caption": caption},
+        files={"document": (filename, content.encode("utf-8"), "text/csv")}, timeout=60)
+    if r.status_code != 200:
+        msg = "telegram sendDocument failed: " + _err(r); print(msg); raise RuntimeError(msg)
+
 def startup_check():
     """Log bot username and whether the chat id is usable. Prints no token and no chat content."""
     try:
@@ -62,5 +71,5 @@ def commands(offset):
         m = u.get("message") or {}
         if str((m.get("chat") or {}).get("id")) != str(_chat_id()): continue
         w = (m.get("text") or "").split("@")[0].strip().lower()
-        if w in ("/t", "/y", "/w", "/m"): out.append(w[1])
+        if w in ("/t", "/y", "/w", "/m", "/costs"): out.append(w[1:])
     return offset, out
