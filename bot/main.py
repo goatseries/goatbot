@@ -15,6 +15,7 @@ def load():
 def save(s): json.dump(s, open(STATE, "w"))
 def main():
     s = load()
+    if not c.DRY_RUN: telegram.startup_check()
     if not s["last_poll"]:
         s["last_poll"] = datetime.now(timezone.utc).isoformat()
     while True:
