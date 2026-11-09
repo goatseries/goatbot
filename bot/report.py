@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from . import config as c, shopify, meta, costs
+from . import config as c, shopify, meta, costs, klaviyo
 def _utm(o):
     v = ((o.get("customerJourneySummary") or {}).get("lastVisit") or {}).get("utmParameters") or {}
     return v
@@ -23,6 +23,19 @@ def _range(period):
     if period == "m":
         return d0.replace(day=1), None, "This Month", now
     return d0, None, "Today", now
+def _subs_line(period, start, end, now):
+    """New Klaviyo profiles. Today/yesterday compare with the previous day. Empty string on any failure."""
+    try:
+        utc = ZoneInfo("UTC"); day = timedelta(days=1)
+        cur = klaviyo.new_profiles(start.astimezone(utc), (end + timedelta(seconds=1) if end else now).astimezone(utc))
+        if cur is None: return ""
+        if period in ("t", "y"):
+            prev = klaviyo.new_profiles((start - day).astimezone(utc), start.astimezone(utc))
+            if prev is not None:
+                return f"\n📧 New subscribers {cur} (prev day {prev})"
+        return f"\n📧 New subscribers {cur}"
+    except Exception as e:
+        print("subs line error: " + type(e).__name__); return ""
 def scoreboard(period="t"):
     start, end, label, now = _range(period)
     utc = ZoneInfo("UTC"); f = "%Y-%m-%dT%H:%M:%SZ"
@@ -41,6 +54,7 @@ def scoreboard(period="t"):
     profit = t["revenue"] - ads - costs_total
     roi = profit / (ads + costs_total) * 100 if (ads + costs_total) else 0
     roas = t["revenue"] / ads if ads else 0
+    subs = _subs_line(period, start, end, now)
     prov = n_miss > 0 or c.SHIP_DEFAULT == 0
     notes = []
     if n_miss: notes.append(f"COGS missing on {n_miss} of {n_ok + n_miss} orders (counted as $0)")
@@ -49,7 +63,7 @@ def scoreboard(period="t"):
     tag = " (provisional)" if prov else ""
     return (f"📊 {label} Scoreboard\nAs of {now.strftime('%b %-d, %-I:%M %p')} ET\n\n"
         f"💰 Profit{tag} ${profit:,.0f} ({roi:.1f}% ROI)\n💵 Revenue ${t['revenue']:,.0f} ({roas:.2f}x)\n"
-        f"💸 Ads ${ads:,.0f} · Costs ${costs_total:,.0f}\n💳 Orders {len(os_)}{note}")
+        f"💸 Ads ${ads:,.0f} · Costs ${costs_total:,.0f}\n💳 Orders {len(os_)}{subs}{note}")
 def creative_report(days=7):
     tz = ZoneInfo(c.TZ); end = datetime.now(tz); start = end - timedelta(days=days - 1)
     os_ = shopify.orders((start.replace(hour=0, minute=0, second=0).astimezone(ZoneInfo("UTC"))).strftime("%Y-%m-%dT%H:%M:%SZ"))
