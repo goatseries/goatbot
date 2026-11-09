@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+import os
 from .version import VERSION
 from . import config as c, shopify, meta, costs, klaviyo
 def _utm(o):
@@ -29,9 +30,10 @@ def explain_order(name, seen=()):
         allowed = {x.upper() for x in costs.load_config().get("order_statuses", ["PAID", "PARTIALLY_REFUNDED"])}
         st = o.get("displayFinancialStatus")
         if st and st not in allowed: why.append(f"status {st} not counted")
+        if costs.load_config().get("exclude_zero_total", True) and costs.is_zero_total(o): why.append("$0 total (fully discounted)")
         if not costs.filter_status([o]): pass
         kept, n_ws = costs.split_wholesale([o])
-        if n_ws: why.append("wholesale (sku/title/tag/source rule)")
+        if n_ws: why.append("wholesale: " + (costs.wholesale_reason(o) or "rule"))
         age_days = (datetime.now(ZoneInfo("UTC")) - datetime.fromisoformat(o["createdAt"].replace("Z", "+00:00"))).days
         counted = not why
         feed = "already alerted" if o["id"] in seen else ("would alert on its next update" if counted and age_days <= 3 else
@@ -170,20 +172,44 @@ def breakdown(period="t"):
     tot = t["fees"] + t["units_cost"] + t["packaging"] + t["shipping"] + t["returns"]
     return (f"🔎 {label} breakdown ({VERSION}, costs.json {costs.config_tag()})\n"
         f"Window start {start.strftime('%b %-d %-I:%M %p')} ET, as of {now.strftime('%-I:%M %p')} ET\n"
-        f"Orders counted {n} · cancelled skipped {n_can} · wholesale excluded {n_ws} · not paid/refunded-status excluded {n_st} · fetched {n_all}\n"
+        f"Orders counted {n} · cancelled skipped {n_can} · wholesale excluded {n_ws} · status/$0-total excluded {n_st} · fetched {n_all}\n"
         f"Revenue ${t['revenue']:,.2f} (excludes tax ${tax_total:,.2f})\nFees ${t['fees']:,.2f} (real on {n_real} of {n} orders, estimate on the rest) · Products ${t['units_cost']:,.2f} · Packaging ${t['packaging']:,.2f}\n"
         f"Labels ${t['shipping']:,.2f} · Returns ${t['returns']:,.2f}\nCosts total ${tot:,.2f} (ads not included)\n"
         f"Line items without a cost: {n_un} (see /unmapped)")
 
+def _tally(o, prods, books, unexp):
+    """prods: product -> [units, list revenue]. books: author -> [standalone units, units inside bundles].
+    unexp: bundles/gift sets whose books are not known -> units."""
+    cfg = costs.load_config()
+    for li in o["lineItems"]["nodes"]:
+        q = li["quantity"]; nm = (li.get("title") or costs.display(li) or "?").strip()
+        try: rev = float(li["originalUnitPriceSet"]["shopMoney"]["amount"]) * q
+        except Exception: rev = 0.0
+        p_ = prods.setdefault(nm, [0, 0.0]); p_[0] += q; p_[1] += rev
+        a = costs.author_of(li, cfg)
+        if a: books.setdefault(a, [0, 0])[0] += q; continue
+        comp = costs.components(li, cfg)
+        if comp:
+            for a in comp: books.setdefault(a, [0, 0])[1] += q
+        else:
+            it = costs.classify(li, cfg)
+            if it and it.get("type") in ("bundle", "gift_set"): unexp[nm] = unexp.get(nm, 0) + q
+def _rank(a, view, n):
+    """Rows (label, units, revenue_or_None, extra) for the chosen view."""
+    if view == "sold":
+        rows = [(k, v[0], v[1], "") for k, v in a["prods"].items()]
+    else:
+        rows = [(k, sum(v), None, f"{v[0]} alone + {v[1]} in bundles") for k, v in a["books"].items()]
+    return sorted(rows, key=lambda r: -r[1])[:n]
 def _week_totals(orders, cogs):
     """Same math as scoreboard(): paid/partially refunded, tax excluded, real fees, label table, wholesale already removed."""
-    t = dict(revenue=0.0, fees=0.0, cogs=0.0, shipping=0.0, returns=0.0); n = 0; prods = {}
+    t = dict(revenue=0.0, fees=0.0, cogs=0.0, shipping=0.0, returns=0.0); n = 0; prods = {}; books = {}; unexp = {}
     for o in orders:
         if o["cancelledAt"]: continue
         k = costs.order_costs(o, cogs); n += 1
         for x in t: t[x] += k[x]
-        for li in o["lineItems"]["nodes"]:
-            nm = costs.display(li) or "?"; prods[nm] = prods.get(nm, 0) + li["quantity"]
+        _tally(o, prods, books, unexp)
+    t["books"] = books; t["unexpanded"] = unexp
     t["costs"] = t["fees"] + t["cogs"] + t["shipping"] + t["returns"]; t["orders"] = n; t["prods"] = prods
     return t
 def _chg(cur, prev, money=True, plain=False):
@@ -220,9 +246,73 @@ def weekly_recap():
          f"💳 Orders {a['orders']} · {_chg(a['orders'], b['orders'], money=False)}"]
     if subs[0] is not None and subs[1] is not None: L.append(f"📧 New subscribers {subs[0]} · {_chg(subs[0], subs[1], money=False)}")
     elif subs[0] is not None: L.append(f"📧 New subscribers {subs[0]}")
-    top = sorted(a["prods"].items(), key=lambda kv: -kv[1])[:5]
-    if top:
-        L += ["", "🏆 Best sellers (units)"]
-        for i, (nm, u) in enumerate(top, 1):
-            pu = b["prods"].get(nm, 0); L.append(f"{i}. {nm[:60]} - {u} (prev {pu})")
+    view = os.environ.get("TOP_VIEW", "books").lower()
+    if view not in ("sold", "books"): view = "books"
+    rows = _rank(a, view, 5)
+    if rows:
+        L += ["", "🏆 Top books sold (bundles expanded into books)" if view == "books" else "🏆 Best sellers (as sold; bundles are their own products)"]
+        for i, (nm, u, rev, extra) in enumerate(rows, 1):
+            prev = (sum(b["books"].get(nm, [0, 0])) if view == "books" else b["prods"].get(nm, [0, 0.0])[0])
+            L.append(f"{i}. {nm[:55]} - {u} units" + (f" · ${rev:,.0f}" if rev is not None else "") + (f" ({extra})" if extra else "") + f" (prev {prev})")
+        if view == "books" and a["unexpanded"]:
+            L.append("Not expanded (contents unknown): " + ", ".join(f"{k} x{v}" for k, v in sorted(a["unexpanded"].items(), key=lambda kv: -kv[1])[:4]))
+        L.append("Use /top for both views and the order list.")
     return "\n".join(L)[:3900]
+
+def top_report():
+    """Last full Mon-Sun week: both views, the filters applied, and the order names used (for reconciling with Shopify)."""
+    tz = ZoneInfo(c.TZ); utc = ZoneInfo("UTC"); now = datetime.now(tz)
+    mon = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=now.weekday()); w1 = mon - timedelta(days=7)
+    f = "%Y-%m-%dT%H:%M:%SZ"
+    allo = shopify.orders(w1.astimezone(utc).strftime(f), (mon - timedelta(seconds=1)).astimezone(utc).strftime(f))
+    n_all = len(allo); paid = costs.filter_status(allo); kept, n_ws = costs.split_wholesale(allo)
+    n_canc = sum(1 for o in kept if o["cancelledAt"]); used = [o for o in kept if not o["cancelledAt"]]
+    a = _week_totals(used, costs.load_cogs())
+    low_o = low_u = 0
+    for o in paid:
+        lu = sum(li["quantity"] for li in o["lineItems"]["nodes"] if costs.is_low_price_book(li))
+        if lu: low_o += 1; low_u += lu
+    st = {}
+    for o in allo: st[o.get("displayFinancialStatus")] = st.get(o.get("displayFinancialStatus"), 0) + 1
+    L = [f"🔎 Top sellers {w1.strftime('%b %-d')}-{(mon - timedelta(days=1)).strftime('%b %-d')} (ET)",
+         f"Orders fetched {n_all} ({', '.join(f'{k} {v}' for k, v in sorted(st.items(), key=lambda kv: str(kv[0])))})",
+         f"Counted {len(used)} (paid/partially refunded, not $0, not wholesale) · wholesale excluded {n_ws} · cancelled {n_canc}",
+         f"Low-price book lines (list price <= ${(costs.load_config().get('wholesale') or {}).get('low_price_book_rule', {}).get('max_unit_price', 10):g}): {low_u} units in {low_o} orders, "
+         + ("EXCLUDED as wholesale" if ((costs.load_config().get('wholesale') or {}).get('low_price_book_rule') or {}).get('enabled') else "still counted (rule off)"), "",
+         "1) As sold (bundles are their own products), units · list revenue"]
+    for i, (nm, u, rev, _) in enumerate(_rank(a, "sold", 10), 1): L.append(f"{i}. {nm[:55]} - {u} · ${rev:,.0f}")
+    L += ["", "2) Books incl. inside bundles and gift sets: alone + in bundles"]
+    for i, (nm, u, _, ex) in enumerate(_rank(a, "books", 10), 1): L.append(f"{i}. {nm} - {u} ({ex})")
+    if a["unexpanded"]: L.append("Not expanded (contents unknown): " + ", ".join(f"{k} x{v}" for k, v in sorted(a["unexpanded"].items(), key=lambda kv: -kv[1])[:6]))
+    why = {}
+    for o in allo:
+        r = costs.exclusion_reason(o)
+        if r: why.setdefault(r, []).append(o.get("name", "?"))
+    if why:
+        L += ["", "Not counted:"]
+        for r, ns in sorted(why.items(), key=lambda kv: -len(kv[1])):
+            L.append(f"- {r}: {len(ns)} orders ({', '.join(ns[:12])}{' ...' if len(ns) > 12 else ''})")
+    names = ", ".join(o.get("name", "?") for o in sorted(used, key=lambda o: o["createdAt"])[:60])
+    L += ["", f"Orders used: {names}" + (" ..." if len(used) > 60 else "")]
+    out = ["\n".join(L)[:3900]]
+    used_ids = {o["id"] for o in used}
+    def lines_for(author, orders):
+        res = []
+        for o in orders:
+            for li in o["lineItems"]["nodes"]:
+                if costs.author_of(li) == author: kind = "standalone"
+                elif author in (costs.components(li) or []): kind = "in " + (li.get("title") or "?")[:32]
+                else: continue
+                try: pr = f"${float(li['originalUnitPriceSet']['shopMoney']['amount']):.2f}"
+                except Exception: pr = "?"
+                res.append(f"{o.get('name', '?')} {o.get('displayFinancialStatus', '?')} x{li['quantity']} {kind} @{pr}")
+        return res
+    det = []
+    for nm, u, _, ex in _rank(a, "books", 3):
+        ln = lines_for(nm, sorted(used, key=lambda o: o["createdAt"]))
+        excl = lines_for(nm, [o for o in allo if o["id"] not in used_ids])
+        det.append(f"📖 {nm}: {u} units ({ex}) from {len(ln)} lines\n" + "\n".join(ln[:45]) + (f"\n... +{len(ln) - 45} more" if len(ln) > 45 else "")
+                   + ("\nNot counted (status/wholesale/cancelled): " + "; ".join(excl[:15]) if excl else ""))
+    txt = "\n\n".join(det)
+    while txt: out.append(txt[:3800]); txt = txt[3800:]
+    return out
