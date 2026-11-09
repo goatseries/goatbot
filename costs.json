@@ -1,0 +1,270 @@
+{
+  "_readme": "Edit this file in the repo and redeploy. items: first match wins (sku exact, or title_contains, case-insensitive). unit_cost is the total COGS for one unit of that product (a bundle's cost is the whole bundle). books_per_unit counts toward the shipping tier (default 1 for type book, 0 otherwise). gift_set true marks gift sets (Legends) for the packaging rules. Matching ignores case, spaces and punctuation and checks product title, variant title, line name, product type and tags. Optional item keys: skus, sku_prefixes, product_types, tags. unmapped_default applies to products matching no item (except exclude_words) and is flagged. Bundle book counts are unconfirmed (flagged). Bath Time books and Mikey '96 Wholesale are deliberately unmapped (cost unknown).",
+  "items": [
+    {
+      "name": "Ultimate Gift Set (5 books, plush, coloring book, tote)",
+      "title_contains": [
+        "ultimate gift set"
+      ],
+      "type": "gift_set",
+      "gift_set": true,
+      "books_per_unit": 5,
+      "unit_cost": 16.75
+    },
+    {
+      "name": "Baby Gift Set (bath book + plush)",
+      "title_contains": [
+        "baby gift set"
+      ],
+      "type": "gift_set",
+      "gift_set": true,
+      "books_per_unit": 0,
+      "unit_cost": 8.0,
+      "assumed": "Baby Gift Set bath book cost (plush only counted)"
+    },
+    {
+      "name": "Legends Bundle (4 books + tote; gift set)",
+      "title_contains": [
+        "legends bundle"
+      ],
+      "type": "bundle",
+      "books_per_unit": 4,
+      "unit_cost": 6.4,
+      "gift_set": true
+    },
+    {
+      "name": "Full Roster Bundle",
+      "title_contains": [
+        "full roster"
+      ],
+      "type": "bundle",
+      "books_per_unit": 7,
+      "unit_cost": 9.45
+    },
+    {
+      "name": "Big Four Bundle",
+      "title_contains": [
+        "big four"
+      ],
+      "type": "bundle",
+      "books_per_unit": 4,
+      "unit_cost": 5.4
+    },
+    {
+      "name": "Champions Bundle (4 books)",
+      "title_contains": [
+        "champions bundle"
+      ],
+      "type": "bundle",
+      "books_per_unit": 4,
+      "unit_cost": 5.4
+    },
+    {
+      "name": "Changed The Game Bundle",
+      "title_contains": [
+        "changed the game"
+      ],
+      "type": "bundle",
+      "books_per_unit": 4,
+      "unit_cost": 5.4
+    },
+    {
+      "name": "2-book bundles",
+      "title_contains": [
+        "jordan brady",
+        "messi gretzky",
+        "tiger serena"
+      ],
+      "type": "bundle",
+      "books_per_unit": 2,
+      "unit_cost": 2.7
+    },
+    {
+      "name": "2-book bundles (Jordan & Messi, Gretzky & Brady; counts unconfirmed)",
+      "title_contains": [
+        "jordan messi",
+        "gretzky brady"
+      ],
+      "type": "bundle",
+      "books_per_unit": 2,
+      "unit_cost": 2.7,
+      "assumed": "bundle book counts"
+    },
+    {
+      "name": "Single hardcovers (retail)",
+      "skus": [
+        "GOAT-MJ-HC",
+        "GOAT-LM-HC",
+        "GOAT-SW-HC",
+        "GOAT-WG-HC",
+        "GOAT-BR-HC",
+        "GOAT-TB-HC",
+        "GOAT-TW-HC"
+      ],
+      "title_contains": [
+        "Michael Jordan, The GOAT",
+        "Lionel Messi, The GOAT",
+        "Serena Williams, The GOAT",
+        "Wayne Gretzky, The GOAT",
+        "Babe Ruth, The GOAT",
+        "Tom Brady, The GOAT",
+        "Tiger Woods, The GOAT"
+      ],
+      "type": "book",
+      "unit_cost": 1.35
+    },
+    {
+      "name": "Stuffy",
+      "title_contains": [
+        "stuffed animal",
+        "plush toy"
+      ],
+      "type": "stuffy",
+      "unit_cost": 8.0
+    },
+    {
+      "name": "Coloring book",
+      "title_contains": [
+        "coloring book"
+      ],
+      "type": "coloring_book",
+      "unit_cost": 1.0
+    },
+    {
+      "name": "Tote bag",
+      "title_contains": [
+        "tote bag"
+      ],
+      "type": "tote",
+      "unit_cost": 1.0
+    }
+  ],
+  "unit_costs_by_type": {
+    "book": 1.35,
+    "tote": 1.0,
+    "coloring_book": 1.0,
+    "stuffy": 8.0
+  },
+  "packaging_costs": {
+    "envelope": 0.59,
+    "gift_box": 0.8,
+    "bundle_box": 0.93
+  },
+  "shipping_label_by_books": {
+    "1": 4.39,
+    "2": 5.13,
+    "4": 5.86,
+    "7": 7.78,
+    "8": 7.78
+  },
+  "no_book_shipping": null,
+  "non_book_adds_shipping": 0,
+  "shipping_extrapolate_per_book": 0.64,
+  "_shipping_note": "Listed tiers are Ian's actual label costs. Missing counts are linearly interpolated between neighbouring tiers; above the top tier adds shipping_extrapolate_per_book per extra book (slope of the 4 to 7 book tiers). All flagged as estimates.",
+  "packaging_rules": [
+    {
+      "boxes": [
+        "bundle_box",
+        "gift_box"
+      ],
+      "when": {
+        "gift_set": true
+      }
+    },
+    {
+      "boxes": [
+        "bundle_box",
+        "gift_box"
+      ],
+      "when": {
+        "min_books": 4,
+        "max_books": 4
+      }
+    },
+    {
+      "boxes": [
+        "bundle_box",
+        "gift_box"
+      ],
+      "when": {
+        "min_books": 5,
+        "max_books": 5
+      },
+      "assumed": "5-book orders get gift box + bundle box"
+    },
+    {
+      "boxes": [
+        "envelope"
+      ],
+      "when": {
+        "min_books": 1,
+        "max_books": 2
+      }
+    },
+    {
+      "boxes": [
+        "envelope"
+      ],
+      "when": {
+        "max_books": 0
+      },
+      "assumed": "orders with no books"
+    },
+    {
+      "boxes": [
+        "bundle_box"
+      ],
+      "when": {
+        "min_books": 7,
+        "max_books": 7
+      }
+    },
+    {
+      "boxes": [
+        "bundle_box"
+      ],
+      "when": {},
+      "assumed": "bundle box for 3, 6 and 8+ book orders"
+    }
+  ],
+  "_packaging_note": "First matching rule wins; boxes are all added. Ian: envelope for single or 2-book orders; 4-book bundles and gift sets get the gift box inside an outer bundle box. Rules marked assumed are guesses and are flagged on the scoreboard.",
+  "unmapped_default": {
+    "type": "book",
+    "unit_cost": 1.35,
+    "books_per_unit": 1,
+    "assumed": "unmapped products treated as 1 book at 1.35",
+    "exclude_words": [
+      "tote",
+      "coloring",
+      "colouring",
+      "plush",
+      "stuffed",
+      "stuffy",
+      "sticker",
+      "gift card",
+      "shipping",
+      "insurance",
+      "tip",
+      "donation",
+      "bath time",
+      "bath book",
+      "mikey"
+    ]
+  },
+  "wholesale": {
+    "sku_prefixes": [
+      "8600143252"
+    ],
+    "title_words": [
+      "wholesale"
+    ],
+    "order_tags": [
+      "wholesale"
+    ],
+    "source_names": [
+      "wholesale"
+    ],
+    "mixed_order_rule": "exclude_order",
+    "_note": "Wholesale is excluded from revenue, costs, profit, order counts, the sale feed, /costs and /unmapped. mixed_order_rule: exclude_order (default, drops the whole order if any line or the order tag/source is wholesale), exclude_lines (drops wholesale lines only, retail lines counted at list price x qty), include_all (off). Customer tags and B2B company data are not read (need extra scopes)."
+  }
+}
