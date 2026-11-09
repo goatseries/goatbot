@@ -111,7 +111,7 @@ def order_costs(o, cogs):
     cur = _m("currentTotalTaxSet")
     tax_refunded = max(0.0, tax - cur) if cur is not None else 0.0
     cg, missing, lines, books, nonbook, gift_set, tags = 0.0, [], 0, 0, False, False, set()
-    unmapped, assumed_books = [], []
+    unmapped, assumed_books, ground = [], [], False
     units_cost = pack_cost = 0.0
     for li in o["lineItems"]["nodes"]:
         lines += 1
@@ -123,6 +123,7 @@ def order_costs(o, cogs):
         books += b * li["quantity"]
         if not b: nonbook = True
         if it and it.get("gift_set"): gift_set = True
+        if it and it.get("ships_ground"): ground = True
         if it and it.get("assumed"): tags.add("estimated: " + it["assumed"])
         if it and it.get("wholesale"): tags.add("wholesale orders use retail packaging/label rules")
         if is_def: assumed_books.append(display(li)); tags.add("unmapped products assumed to be books")
@@ -155,6 +156,7 @@ def order_costs(o, cogs):
     else:
         ship = c.SHIP_DEFAULT
         if not ship: tags.add("shipping not included yet")
+    if tiers and ground and cfg.get("ground_label") is not None: ship = max(ship, float(cfg["ground_label"]))
     ret = max(0.0, float(o["totalRefundedSet"]["shopMoney"]["amount"]) - tax_refunded)
     return {"fee_real": fee_real, "tax": tax, "revenue": rev, "fees": fee, "cogs": cg, "shipping": ship, "returns": ret,
             "missing_cogs": missing, "lines": lines, "books": books, "tags": tags,
