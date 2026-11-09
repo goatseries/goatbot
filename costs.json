@@ -265,13 +265,24 @@
       "wholesale"
     ],
     "order_tags": [
+      "faire",
       "wholesale"
     ],
     "source_names": [
+      "faire",
       "wholesale"
     ],
     "mixed_order_rule": "exclude_order",
-    "_note": "Wholesale is excluded from revenue, costs, profit, order counts, the sale feed, /costs and /unmapped. mixed_order_rule: exclude_order (default, drops the whole order if any line or the order tag/source is wholesale), exclude_lines (drops wholesale lines only, retail lines counted at list price x qty), include_all (off). Customer tags and B2B company data are not read (need extra scopes)."
+    "_note": "Wholesale is excluded from revenue, costs, profit, order counts, the sale feed, /costs and /unmapped. mixed_order_rule: exclude_order (default, drops the whole order if any line or the order tag/source is wholesale), exclude_lines (drops wholesale lines only, retail lines counted at list price x qty), include_all (off). Customer tags and B2B company data are not read (need extra scopes).",
+    "low_price_book_rule": {
+      "enabled": true,
+      "title_contains": [
+        "the goat",
+        "the g.o.a.t"
+      ],
+      "max_unit_price": 10.0,
+      "_note": "ON: a 'The GOAT' book line with list price <= max_unit_price (the 9.50 listings) counts as wholesale. Source/app and tags containing 'faire' or 'wholesale' are wholesale too."
+    }
   },
   "order_statuses": [
     "PAID",
@@ -279,5 +290,54 @@
   ],
   "_order_statuses": "Orders counted in revenue, costs, profit, counts and the sale feed. Add REFUNDED to also count fully refunded orders (their fees and labels are then costs with no revenue).",
   "ground_label": 6.19,
-  "_ground_note": "Orders with a stuffy or gift set cannot ship Media Mail; the data shows Ground Advantage at 6.19 for those. Label = max(book tier, ground_label). Set ground_label to null to turn off."
+  "_ground_note": "Orders with a stuffy or gift set cannot ship Media Mail; the data shows Ground Advantage at 6.19 for those. Label = max(book tier, ground_label). Set ground_label to null to turn off.",
+  "authors": [
+    "Michael Jordan",
+    "Lionel Messi",
+    "Serena Williams",
+    "Wayne Gretzky",
+    "Babe Ruth",
+    "Tom Brady",
+    "Tiger Woods"
+  ],
+  "bundle_components": {
+    "jordan brady": [
+      "Michael Jordan",
+      "Tom Brady"
+    ],
+    "messi gretzky": [
+      "Lionel Messi",
+      "Wayne Gretzky"
+    ],
+    "tiger serena": [
+      "Tiger Woods",
+      "Serena Williams"
+    ],
+    "jordan messi": [
+      "Michael Jordan",
+      "Lionel Messi"
+    ],
+    "gretzky brady": [
+      "Wayne Gretzky",
+      "Tom Brady"
+    ],
+    "legends bundle": [
+      "Michael Jordan",
+      "Lionel Messi",
+      "Tom Brady",
+      "Serena Williams"
+    ],
+    "full roster": [
+      "Michael Jordan",
+      "Lionel Messi",
+      "Serena Williams",
+      "Wayne Gretzky",
+      "Babe Ruth",
+      "Tom Brady",
+      "Tiger Woods"
+    ]
+  },
+  "_components_note": "Book contents of bundles, used only for the books view of /top and /week. Bundles not listed (Big Four, Champions, Changed The Game, gift sets) are NOT expanded because their exact books are not confirmed; add them here when known. 2-book bundles and Legends/Full Roster come from the storefront descriptions and product names.",
+  "exclude_zero_total": true,
+  "_zero_note": "Orders with a $0.00 total (100% discounted, e.g. giveaways made as draft orders) are excluded everywhere: scoreboards, /week, /top, /breakdown, sale alerts."
 }
