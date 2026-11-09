@@ -29,18 +29,27 @@ def scoreboard(period="t"):
     os_ = shopify.orders(start.astimezone(utc).strftime(f), end.astimezone(utc).strftime(f) if end else None)
     cogs = costs.load_cogs()
     t = dict(revenue=0, fees=0, cogs=0, shipping=0, returns=0)
+    n_ok = n_miss = 0
     for o in os_:
         if o["cancelledAt"]: continue
         k = costs.order_costs(o, cogs)
         for x in t: t[x] += k[x]
+        if k["missing_cogs"]: n_miss += 1
+        else: n_ok += 1
     ads = meta.spend(start.strftime("%Y-%m-%d"), (end or now).strftime("%Y-%m-%d"))
     costs_total = t["fees"] + t["cogs"] + t["shipping"] + t["returns"]
     profit = t["revenue"] - ads - costs_total
     roi = profit / (ads + costs_total) * 100 if (ads + costs_total) else 0
     roas = t["revenue"] / ads if ads else 0
+    prov = n_miss > 0 or c.SHIP_DEFAULT == 0
+    notes = []
+    if n_miss: notes.append(f"COGS missing on {n_miss} of {n_ok + n_miss} orders (counted as $0)")
+    if c.SHIP_DEFAULT == 0: notes.append("shipping not included yet")
+    note = ("\n⚠️ Provisional: " + "; ".join(notes)) if prov else ""
+    tag = " (provisional)" if prov else ""
     return (f"📊 {label} Scoreboard\nAs of {now.strftime('%b %-d, %-I:%M %p')} ET\n\n"
-        f"💰 Profit ${profit:,.0f} ({roi:.1f}% ROI)\n💵 Revenue ${t['revenue']:,.0f} ({roas:.2f}x)\n"
-        f"💸 Ads ${ads:,.0f} · Costs ${costs_total:,.0f}\n💳 Orders {len(os_)}")
+        f"💰 Profit{tag} ${profit:,.0f} ({roi:.1f}% ROI)\n💵 Revenue ${t['revenue']:,.0f} ({roas:.2f}x)\n"
+        f"💸 Ads ${ads:,.0f} · Costs ${costs_total:,.0f}\n💳 Orders {len(os_)}{note}")
 def creative_report(days=7):
     tz = ZoneInfo(c.TZ); end = datetime.now(tz); start = end - timedelta(days=days - 1)
     os_ = shopify.orders((start.replace(hour=0, minute=0, second=0).astimezone(ZoneInfo("UTC"))).strftime("%Y-%m-%dT%H:%M:%SZ"))
