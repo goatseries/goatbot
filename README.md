@@ -24,3 +24,8 @@ Shopify's Admin API does not expose the Shopify Shipping label cost per order (c
 COGS per unit, packaging, and label cost by number of books live in costs.json (repo root, edit and redeploy). Order cost = unit costs + packaging box + label; label uses the book-count table, with linear interpolation for counts not listed and a per-book extrapolation above the top tier (both flagged as estimates). /costs sends cost-mapping.csv listing every variant sold recently with mapped yes/no, cost used and Shopify cost status. Every assumption (estimated tiers, assumed packaging rule, non-book shipping, bundle costs, unmapped items) adds a note and keeps profit "provisional". Legacy cogs.csv and Shopify cost per item are still fallbacks for unmapped items.
 
 Packaging (v6): rules in costs.json packaging_rules (first match wins). Envelope for 1-2 book orders, 4-book bundles and gift sets get a gift box inside an outer bundle box (both costs added), bundle box alone for 3 and 5+ books (assumed, flagged).
+
+/unmapped sends titles/SKUs/types/tags that match no costs.json item (no figures). Matching is case/punctuation-insensitive across product title, variant title, line name, product type and tags; unmapped_default treats leftover non-excluded products as 1 book at 1.35 (flagged).
+
+## Wholesale
+The bot is for the online store. Wholesale (SKU prefix 8600143252, 'wholesale' in a line title, or order tag/source 'wholesale') is excluded from revenue, costs, profit, order counts, the sale feed, /costs and /unmapped. Mixed orders: costs.json wholesale.mixed_order_rule (exclude_order default). Scoreboard shows how many wholesale orders were excluded.
