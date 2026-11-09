@@ -70,6 +70,9 @@ def commands(offset):
         offset = u["update_id"] + 1
         m = u.get("message") or {}
         if str((m.get("chat") or {}).get("id")) != str(_chat_id()): continue
-        w = (m.get("text") or "").split("@")[0].strip().lower()
+        parts = (m.get("text") or "").strip().split(None, 1)
+        if not parts: continue
+        w = parts[0].split("@")[0].lower()
         if w in ("/t", "/y", "/w", "/m", "/costs", "/unmapped", "/breakdown"): out.append(w[1:])
+        elif w == "/order" and len(parts) > 1 and re.fullmatch(r"#?\d{1,10}", parts[1].strip()): out.append("order " + parts[1].strip())
     return offset, out
