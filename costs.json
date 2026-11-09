@@ -99,39 +99,49 @@
   "_shipping_note": "Listed tiers are Ian's actual label costs. Missing counts are linearly interpolated between neighbouring tiers; above the top tier adds shipping_extrapolate_per_book per extra book (slope of the 4 to 7 book tiers). All flagged as estimates.",
   "packaging_rules": [
     {
-      "box": "gift_box",
+      "boxes": [
+        "bundle_box",
+        "gift_box"
+      ],
       "when": {
         "gift_set": true
       }
     },
     {
-      "box": "gift_box",
+      "boxes": [
+        "bundle_box",
+        "gift_box"
+      ],
       "when": {
         "min_books": 4,
         "max_books": 4
       }
     },
     {
-      "box": "envelope",
+      "boxes": [
+        "envelope"
+      ],
       "when": {
         "min_books": 1,
         "max_books": 2
       }
     },
     {
-      "box": "envelope",
+      "boxes": [
+        "envelope"
+      ],
       "when": {
         "max_books": 0
       },
       "assumed": "orders with no books"
     },
     {
-      "box": "bundle_box",
+      "boxes": [
+        "bundle_box"
+      ],
       "when": {},
       "assumed": "bundle box for 3 and 5+ book orders"
     }
   ],
-  "_packaging_note": "First matching rule wins. Ian: envelope for single or 2-book orders, gift box for 4-book bundles and gift sets. Rules marked assumed are guesses and are flagged on the scoreboard.",
-  "gift_box_extra_shipping_box_cost": null,
-  "_gift_box_note": "Ian said both 'gift box goes inside a shipping box' and 'gift box for 4-book bundles'. null = gift box cost replaces the shipping box (nothing added); set a number to add an outer shipping box cost on top of every gift-box order."
+  "_packaging_note": "First matching rule wins; boxes are all added. Ian: envelope for single or 2-book orders; 4-book bundles and gift sets get the gift box inside an outer bundle box. Rules marked assumed are guesses and are flagged on the scoreboard."
 }
