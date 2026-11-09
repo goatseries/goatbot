@@ -266,5 +266,10 @@
     ],
     "mixed_order_rule": "exclude_order",
     "_note": "Wholesale is excluded from revenue, costs, profit, order counts, the sale feed, /costs and /unmapped. mixed_order_rule: exclude_order (default, drops the whole order if any line or the order tag/source is wholesale), exclude_lines (drops wholesale lines only, retail lines counted at list price x qty), include_all (off). Customer tags and B2B company data are not read (need extra scopes)."
-  }
+  },
+  "order_statuses": [
+    "PAID",
+    "PARTIALLY_REFUNDED"
+  ],
+  "_order_statuses": "Orders counted in revenue, costs, profit, counts and the sale feed. Add REFUNDED to also count fully refunded orders (their fees and labels are then costs with no revenue)."
 }
