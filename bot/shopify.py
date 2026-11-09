@@ -26,12 +26,12 @@ def _post(body):
 Q = """
 query($q:String!,$after:String){orders(first:25,after:$after,query:$q,sortKey:CREATED_AT){
  pageInfo{hasNextPage endCursor}
- nodes{id name createdAt test cancelledAt
+ nodes{id name createdAt test cancelledAt tags sourceName
   totalPriceSet{shopMoney{amount}} totalRefundedSet{shopMoney{amount}}
   totalShippingPriceSet{shopMoney{amount}}
   customer{numberOfOrders}
   customerJourneySummary{lastVisit{utmParameters{source medium campaign content}}}
-  lineItems(first:25){nodes{sku title quantity originalUnitPriceSet{shopMoney{amount}} variant{id title sku price inventoryItem{unitCost{amount}}}}}
+  lineItems(first:25){nodes{sku title name variantTitle product{title productType tags} quantity originalUnitPriceSet{shopMoney{amount}} variant{id title sku price inventoryItem{unitCost{amount}}}}}
  }}}"""
 def orders(since_iso, until_iso=None):
     """All non-test orders created in [since, until]. Needs read_orders."""
