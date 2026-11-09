@@ -83,10 +83,33 @@ def _tier(books, tiers, cfg):
     if hi: return t[min(hi)], True
     top = max(t)
     return t[top] + float(cfg.get("shipping_extrapolate_per_book", 0)) * (books - top), True
+COUNT_STATUSES = None
+def real_fee(o):
+    """(fee, True) from Shopify Payments transaction fees on successful sale/capture transactions, else (None, False)."""
+    tot, found = 0.0, False
+    for t in o.get("transactions") or []:
+        if t.get("kind") not in ("SALE", "CAPTURE") or t.get("status") != "SUCCESS": continue
+        for f in t.get("fees") or []:
+            try:
+                tot += float(f["amount"]["amount"]) + float((f.get("taxAmount") or {}).get("amount") or 0); found = True
+            except Exception: pass
+    return (tot, True) if found else (None, False)
+def filter_status(orders):
+    """Keep paid and partially refunded orders (costs.json order_statuses overrides). Orders without status data are kept."""
+    allowed = {x.upper() for x in load_config().get("order_statuses", ["PAID", "PARTIALLY_REFUNDED"])}
+    return [o for o in orders if not o.get("displayFinancialStatus") or o["displayFinancialStatus"] in allowed]
 def order_costs(o, cogs):
     cfg = load_config()
-    rev = float(o["totalPriceSet"]["shopMoney"]["amount"])
-    fee = rev * c.FEE_PCT / 100 + c.FEE_FIXED
+    gross = float(o["totalPriceSet"]["shopMoney"]["amount"])
+    def _m(k):
+        try: return float(o[k]["shopMoney"]["amount"])
+        except Exception: return None
+    tax = _m("totalTaxSet") or 0.0
+    rev = gross - tax                      # sales tax is not income; shipping charged stays in revenue
+    fee, fee_real = real_fee(o)
+    if fee is None: fee, fee_real = gross * c.FEE_PCT / 100 + c.FEE_FIXED, False
+    cur = _m("currentTotalTaxSet")
+    tax_refunded = max(0.0, tax - cur) if cur is not None else 0.0
     cg, missing, lines, books, nonbook, gift_set, tags = 0.0, [], 0, 0, False, False, set()
     unmapped, assumed_books = [], []
     units_cost = pack_cost = 0.0
@@ -132,8 +155,8 @@ def order_costs(o, cogs):
     else:
         ship = c.SHIP_DEFAULT
         if not ship: tags.add("shipping not included yet")
-    ret = float(o["totalRefundedSet"]["shopMoney"]["amount"])
-    return {"revenue": rev, "fees": fee, "cogs": cg, "shipping": ship, "returns": ret,
+    ret = max(0.0, float(o["totalRefundedSet"]["shopMoney"]["amount"]) - tax_refunded)
+    return {"fee_real": fee_real, "tax": tax, "revenue": rev, "fees": fee, "cogs": cg, "shipping": ship, "returns": ret,
             "missing_cogs": missing, "lines": lines, "books": books, "tags": tags,
             "unmapped": unmapped, "assumed_books": assumed_books,
             "units_cost": units_cost, "packaging": pack_cost}
@@ -150,6 +173,7 @@ def _is_ws_order(o, w):
     return bool(src) and any(norm(x) and norm(x) in src for x in w.get("source_names", []))
 def split_wholesale(orders):
     """(retail_orders, n_excluded). Rule in costs.json wholesale.mixed_order_rule."""
+    orders = filter_status(orders)
     w = load_config().get("wholesale")
     if not w or w.get("mixed_order_rule") == "include_all": return orders, 0
     rule = w.get("mixed_order_rule", "exclude_order"); keep, n = [], 0
