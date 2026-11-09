@@ -9,7 +9,8 @@
       "type": "gift_set",
       "gift_set": true,
       "books_per_unit": 5,
-      "unit_cost": 16.75
+      "unit_cost": 16.75,
+      "ships_ground": true
     },
     {
       "name": "Baby Gift Set (bath book + plush)",
@@ -20,7 +21,8 @@
       "gift_set": true,
       "books_per_unit": 0,
       "unit_cost": 8.0,
-      "assumed": "Baby Gift Set bath book cost (plush only counted)"
+      "assumed": "Baby Gift Set bath book cost (plush only counted)",
+      "ships_ground": true
     },
     {
       "name": "Legends Bundle (4 books + tote; gift set)",
@@ -120,7 +122,8 @@
         "plush toy"
       ],
       "type": "stuffy",
-      "unit_cost": 8.0
+      "unit_cost": 8.0,
+      "ships_ground": true
     },
     {
       "name": "Coloring book",
@@ -153,14 +156,17 @@
   "shipping_label_by_books": {
     "1": 4.39,
     "2": 5.13,
+    "3": 5.86,
     "4": 5.86,
-    "7": 7.78,
-    "8": 7.78
+    "5": 6.6,
+    "6": 7.34,
+    "7": 7.34,
+    "8": 8.08
   },
   "no_book_shipping": null,
   "non_book_adds_shipping": 0,
-  "shipping_extrapolate_per_book": 0.64,
-  "_shipping_note": "Listed tiers are Ian's actual label costs. Missing counts are linearly interpolated between neighbouring tiers; above the top tier adds shipping_extrapolate_per_book per extra book (slope of the 4 to 7 book tiers). All flagged as estimates.",
+  "shipping_extrapolate_per_book": 0.52,
+  "_shipping_note": "Fitted to Ian's Shopify Shipping Media Mail labels (about 122 labels, Nov 2026): rates step by about $0.74 per pound (4.39, 5.13, 5.86, 6.60, 7.34, 8.08), books weigh about 0.7 lb each. 5, 6 and 8 books are inferred from order totals, not observed directly. Above 8 books adds 0.52 per book (0.74 per pound / about 1.4 books).",
   "packaging_rules": [
     {
       "boxes": [
@@ -271,5 +277,7 @@
     "PAID",
     "PARTIALLY_REFUNDED"
   ],
-  "_order_statuses": "Orders counted in revenue, costs, profit, counts and the sale feed. Add REFUNDED to also count fully refunded orders (their fees and labels are then costs with no revenue)."
+  "_order_statuses": "Orders counted in revenue, costs, profit, counts and the sale feed. Add REFUNDED to also count fully refunded orders (their fees and labels are then costs with no revenue).",
+  "ground_label": 6.19,
+  "_ground_note": "Orders with a stuffy or gift set cannot ship Media Mail; the data shows Ground Advantage at 6.19 for those. Label = max(book tier, ground_label). Set ground_label to null to turn off."
 }
