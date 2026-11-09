@@ -24,14 +24,14 @@ def _post(body):
         if r.status_code == 401 and attempt == 0 and c.SHOP_CLIENT_ID(): continue
         r.raise_for_status(); return r.json()
 Q = """
-query($q:String!,$after:String){orders(first:100,after:$after,query:$q,sortKey:CREATED_AT){
+query($q:String!,$after:String){orders(first:25,after:$after,query:$q,sortKey:CREATED_AT){
  pageInfo{hasNextPage endCursor}
  nodes{id name createdAt test cancelledAt
   totalPriceSet{shopMoney{amount}} totalRefundedSet{shopMoney{amount}}
   totalShippingPriceSet{shopMoney{amount}}
   customer{numberOfOrders}
   customerJourneySummary{lastVisit{utmParameters{source medium campaign content}}}
-  lineItems(first:50){nodes{sku title quantity originalUnitPriceSet{shopMoney{amount}}}}
+  lineItems(first:25){nodes{sku title quantity originalUnitPriceSet{shopMoney{amount}} variant{id title sku price inventoryItem{unitCost{amount}}}}}
  }}}"""
 def orders(since_iso, until_iso=None):
     """All non-test orders created in [since, until]. Needs read_orders."""
