@@ -95,6 +95,8 @@ def main():
                     telegram.send_document("cost-mapping.csv", csv_text, f"{n} products/variants from the last {c.COSTS_DAYS} days; {n_un} are not mapped in costs.json, {n_no} have no Shopify cost per item set. Add the unmapped ones to costs.json.")
                 elif p_ == "breakdown": telegram.send(report.breakdown())
                 elif p_.startswith("order "): telegram.send(report.explain_order(p_.split(" ", 1)[1], set(s["seen"])))
+                elif p_ == "top":
+                    for part in report.top_report(): telegram.send(part)
                 elif p_ == "week": telegram.send(report.weekly_recap())
                 elif p_ == "unmapped": telegram.send(report.unmapped_report())
                 else: telegram.send(report.scoreboard(p_))
