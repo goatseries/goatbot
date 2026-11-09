@@ -22,8 +22,12 @@ def main():
         try:
             since = (datetime.fromisoformat(s["last_poll"]) - timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%SZ")
             cogs = costs.load_cogs()
-            for o in shopify.orders(since):
+            got = shopify.orders(since)
+            keep_ids = {o["id"] for o in costs.split_wholesale(got)[0]}
+            for o in got:
                 if o["id"] in s["seen"] or o["cancelledAt"]: continue
+                if o["id"] not in keep_ids:
+                    s["seen"].append(o["id"]); continue
                 telegram.send(report.sale_message(o, cogs)); s["seen"].append(o["id"])
             s["seen"] = s["seen"][-2000:]
             s["last_poll"] = datetime.now(timezone.utc).isoformat()
@@ -39,6 +43,7 @@ def main():
                 if p_ == "costs":
                     csv_text, n, n_no, n_un = report.costs_template()
                     telegram.send_document("cost-mapping.csv", csv_text, f"{n} products/variants from the last {c.COSTS_DAYS} days; {n_un} are not mapped in costs.json, {n_no} have no Shopify cost per item set. Add the unmapped ones to costs.json.")
+                elif p_ == "unmapped": telegram.send(report.unmapped_report())
                 else: telegram.send(report.scoreboard(p_))
             save(s)
         except Exception as e:
