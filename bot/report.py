@@ -174,3 +174,55 @@ def breakdown(period="t"):
         f"Revenue ${t['revenue']:,.2f} (excludes tax ${tax_total:,.2f})\nFees ${t['fees']:,.2f} (real on {n_real} of {n} orders, estimate on the rest) · Products ${t['units_cost']:,.2f} · Packaging ${t['packaging']:,.2f}\n"
         f"Labels ${t['shipping']:,.2f} · Returns ${t['returns']:,.2f}\nCosts total ${tot:,.2f} (ads not included)\n"
         f"Line items without a cost: {n_un} (see /unmapped)")
+
+def _week_totals(orders, cogs):
+    """Same math as scoreboard(): paid/partially refunded, tax excluded, real fees, label table, wholesale already removed."""
+    t = dict(revenue=0.0, fees=0.0, cogs=0.0, shipping=0.0, returns=0.0); n = 0; prods = {}
+    for o in orders:
+        if o["cancelledAt"]: continue
+        k = costs.order_costs(o, cogs); n += 1
+        for x in t: t[x] += k[x]
+        for li in o["lineItems"]["nodes"]:
+            nm = costs.display(li) or "?"; prods[nm] = prods.get(nm, 0) + li["quantity"]
+    t["costs"] = t["fees"] + t["cogs"] + t["shipping"] + t["returns"]; t["orders"] = n; t["prods"] = prods
+    return t
+def _chg(cur, prev, money=True, plain=False):
+    """'▲ +12.3%' style change; dollar change when prior is 0 or the measure can be negative."""
+    d = cur - prev
+    if abs(d) < 0.005: return "no change"
+    arrow = "▲" if d > 0 else "▼"
+    if plain or prev <= 0: return f"{arrow} {'+' if d > 0 else '-'}{'$' if money else ''}{abs(d):,.0f}"
+    return f"{arrow} {d / prev * 100:+.0f}%"
+def weekly_recap():
+    """Previous full Mon-Sun week (ET) vs the week before."""
+    tz = ZoneInfo(c.TZ); utc = ZoneInfo("UTC"); now = datetime.now(tz)
+    mon = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=now.weekday())
+    w1, w0 = mon - timedelta(days=7), mon - timedelta(days=14)     # w1 = last week start, w0 = week before
+    f = "%Y-%m-%dT%H:%M:%SZ"
+    allo = shopify.orders(w0.astimezone(utc).strftime(f), (mon - timedelta(seconds=1)).astimezone(utc).strftime(f))
+    allo, _ = costs.split_wholesale(allo); cogs = costs.load_cogs()
+    def created(o): return datetime.fromisoformat(o["createdAt"].replace("Z", "+00:00")).astimezone(tz)
+    a = _week_totals([o for o in allo if w1 <= created(o) < mon], cogs)
+    b = _week_totals([o for o in allo if w0 <= created(o) < w1], cogs)
+    day = lambda d: d.strftime("%Y-%m-%d")
+    for t_, s_, e_ in ((a, w1, mon - timedelta(days=1)), (b, w0, w1 - timedelta(days=1))):
+        t_["ads"] = meta.spend(day(s_), day(e_)); t_["profit"] = t_["revenue"] - t_["ads"] - t_["costs"]
+        t_["roas"] = t_["revenue"] / t_["ads"] if t_["ads"] else 0
+        t_["roi"] = t_["profit"] / (t_["ads"] + t_["costs"]) * 100 if (t_["ads"] + t_["costs"]) else 0
+    subs = [klaviyo.new_profiles(w1.astimezone(utc), mon.astimezone(utc)), klaviyo.new_profiles(w0.astimezone(utc), w1.astimezone(utc))]
+    rng = lambda s_, e_: f"{s_.strftime('%b %-d')}-{e_.strftime('%b %-d')}"
+    L = [f"📅 Weekly recap {rng(w1, mon - timedelta(days=1))}", f"vs {rng(w0, w1 - timedelta(days=1))}", "",
+         f"💰 Profit ${a['profit']:,.0f} ({a['roi']:.1f}% ROI) · {_chg(a['profit'], b['profit'], plain=True)} (was ${b['profit']:,.0f})",
+         f"💵 Revenue ${a['revenue']:,.0f} · {_chg(a['revenue'], b['revenue'])}",
+         f"💸 Ads ${a['ads']:,.0f} · {_chg(a['ads'], b['ads'])}",
+         f"🎯 ROAS {a['roas']:.2f}x · was {b['roas']:.2f}x",
+         f"🧾 Costs ${a['costs']:,.0f} · {_chg(a['costs'], b['costs'])}",
+         f"💳 Orders {a['orders']} · {_chg(a['orders'], b['orders'], money=False)}"]
+    if subs[0] is not None and subs[1] is not None: L.append(f"📧 New subscribers {subs[0]} · {_chg(subs[0], subs[1], money=False)}")
+    elif subs[0] is not None: L.append(f"📧 New subscribers {subs[0]}")
+    top = sorted(a["prods"].items(), key=lambda kv: -kv[1])[:5]
+    if top:
+        L += ["", "🏆 Best sellers (units)"]
+        for i, (nm, u) in enumerate(top, 1):
+            pu = b["prods"].get(nm, 0); L.append(f"{i}. {nm[:60]} - {u} (prev {pu})")
+    return "\n".join(L)[:3900]
