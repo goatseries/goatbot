@@ -127,16 +127,16 @@ def breakdown(period="t"):
     start, end, label, now = _range(period)
     utc = ZoneInfo("UTC"); f = "%Y-%m-%dT%H:%M:%SZ"
     os_ = shopify.orders(start.astimezone(utc).strftime(f), end.astimezone(utc).strftime(f) if end else None)
-    n_all = len(os_); os_, n_ws = costs.split_wholesale(os_)
-    cogs = costs.load_cogs(); t = dict(revenue=0, fees=0, units_cost=0, packaging=0, shipping=0, returns=0); n = n_can = n_un = 0
+    n_all = len(os_); n_st = n_all - len(costs.filter_status(os_)); os_, n_ws = costs.split_wholesale(os_)
+    cogs = costs.load_cogs(); t = dict(revenue=0, fees=0, units_cost=0, packaging=0, shipping=0, returns=0); n = n_can = n_un = n_real = 0; tax_total = 0.0
     for o in os_:
         if o["cancelledAt"]: n_can += 1; continue
-        k = costs.order_costs(o, cogs); n += 1; n_un += len(k["missing_cogs"])
+        k = costs.order_costs(o, cogs); n += 1; n_un += len(k["missing_cogs"]); n_real += k["fee_real"]; tax_total += k["tax"]
         for x in t: t[x] += k[x]
     tot = t["fees"] + t["units_cost"] + t["packaging"] + t["shipping"] + t["returns"]
     return (f"🔎 {label} breakdown ({VERSION}, costs.json {costs.config_tag()})\n"
         f"Window start {start.strftime('%b %-d %-I:%M %p')} ET, as of {now.strftime('%-I:%M %p')} ET\n"
-        f"Orders counted {n} · cancelled skipped {n_can} · wholesale excluded {n_ws} · fetched {n_all}\n"
-        f"Revenue ${t['revenue']:,.2f}\nFees ${t['fees']:,.2f} · Products ${t['units_cost']:,.2f} · Packaging ${t['packaging']:,.2f}\n"
+        f"Orders counted {n} · cancelled skipped {n_can} · wholesale excluded {n_ws} · not paid/refunded-status excluded {n_st} · fetched {n_all}\n"
+        f"Revenue ${t['revenue']:,.2f} (excludes tax ${tax_total:,.2f})\nFees ${t['fees']:,.2f} (real on {n_real} of {n} orders, estimate on the rest) · Products ${t['units_cost']:,.2f} · Packaging ${t['packaging']:,.2f}\n"
         f"Labels ${t['shipping']:,.2f} · Returns ${t['returns']:,.2f}\nCosts total ${tot:,.2f} (ads not included)\n"
         f"Line items without a cost: {n_un} (see /unmapped)")
