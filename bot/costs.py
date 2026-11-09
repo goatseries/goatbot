@@ -89,12 +89,13 @@ def order_costs(o, cogs):
     fee = rev * c.FEE_PCT / 100 + c.FEE_FIXED
     cg, missing, lines, books, nonbook, gift_set, tags = 0.0, [], 0, 0, False, False, set()
     unmapped, assumed_books = [], []
+    units_cost = pack_cost = 0.0
     for li in o["lineItems"]["nodes"]:
         lines += 1
         it, is_def = resolve(li, cfg)
         u = unit_cost(li, cogs, cfg)
         if u is None: missing.append(line_key(li))
-        else: cg += u * li["quantity"]
+        else: cg += u * li["quantity"]; units_cost += u * li["quantity"]
         b = books_in(li, it)
         books += b * li["quantity"]
         if not b: nonbook = True
@@ -115,7 +116,7 @@ def order_costs(o, cogs):
             boxes = r["boxes"]
             if r.get("assumed"): tags.add("packaging assumed: " + r["assumed"])
             break
-        if boxes: cg += sum(float(pk.get(x, 0)) for x in boxes)
+        if boxes: pack_cost = sum(float(pk.get(x, 0)) for x in boxes); cg += pack_cost
     # shipping label
     tiers = cfg.get("shipping_label_by_books")
     if tiers:
@@ -134,7 +135,8 @@ def order_costs(o, cogs):
     ret = float(o["totalRefundedSet"]["shopMoney"]["amount"])
     return {"revenue": rev, "fees": fee, "cogs": cg, "shipping": ship, "returns": ret,
             "missing_cogs": missing, "lines": lines, "books": books, "tags": tags,
-            "unmapped": unmapped, "assumed_books": assumed_books}
+            "unmapped": unmapped, "assumed_books": assumed_books,
+            "units_cost": units_cost, "packaging": pack_cost}
 
 def _is_ws_line(li, w):
     sku = ((li.get("sku") or (li.get("variant") or {}).get("sku")) or "").strip()
@@ -163,3 +165,9 @@ def split_wholesale(orders):
             keep.append(o2)
         else: n += 1
     return keep, n
+
+def config_tag():
+    """Short fingerprint of costs.json so readings can be traced to a config."""
+    import hashlib
+    try: return hashlib.sha1(open(os.environ.get("COSTS_JSON", "costs.json"), "rb").read()).hexdigest()[:7]
+    except Exception: return "none"
