@@ -22,3 +22,4 @@ FEE_PCT = float(env("SHOPIFY_FEE_PCT", "2.9"))
 FEE_FIXED = float(env("SHOPIFY_FEE_FIXED", "0.30"))
 SHIP_DEFAULT = float(env("DEFAULT_SHIPPING_COST", "0"))
 DRY_RUN = env("DRY_RUN", "1") == "1"
+COSTS_DAYS = int(env("COSTS_DAYS", "90"))
