@@ -35,7 +35,11 @@ def main():
                     # creative report disabled in v1: report.creative_report()
                     s["sent_slots"] = (s["sent_slots"] + [slot])[-20:]
             s["tg_offset"], reqs = telegram.commands(s.get("tg_offset", 0))
-            for p_ in reqs: telegram.send(report.scoreboard(p_))
+            for p_ in reqs:
+                if p_ == "costs":
+                    csv_text, n, n_no = report.costs_template()
+                    telegram.send_document("cogs.csv", csv_text, f"{n} products/variants from the last {c.COSTS_DAYS} days; {n_no} have no Shopify cost per item set. Fill the cogs column (optional override of Shopify cost) and send the file back.")
+                else: telegram.send(report.scoreboard(p_))
             save(s)
         except Exception as e:
             print("error:", redact(type(e).__name__ + ": " + str(e)))
