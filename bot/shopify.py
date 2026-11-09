@@ -26,7 +26,7 @@ def _post(body):
 Q = """
 query($q:String!,$after:String){orders(first:25,after:$after,query:$q,sortKey:CREATED_AT){
  pageInfo{hasNextPage endCursor}
- nodes{id name createdAt test cancelledAt tags sourceName
+ nodes{id name createdAt updatedAt test cancelledAt closed tags sourceName
   displayFinancialStatus totalPriceSet{shopMoney{amount}} totalTaxSet{shopMoney{amount}} currentTotalTaxSet{shopMoney{amount}} totalRefundedSet{shopMoney{amount}}
   transactions(first:10){kind status gateway fees{amount{amount} taxAmount{amount}}}
   totalShippingPriceSet{shopMoney{amount}}
@@ -56,3 +56,14 @@ def orders(since_iso, until_iso=None, field="created_at"):
         out += [o for o in d["nodes"] if not o["test"]]
         if not d["pageInfo"]["hasNextPage"]: return out
         after = d["pageInfo"]["endCursor"]
+
+def find_order(name):
+    """Order(s) matching a name like 1234 or #1234, with extra debug fields. Falls back to the standard query on error."""
+    n = str(name).strip().lstrip("#")
+    q = f"name:#{n}"
+    body = Q.replace("orders(first:25,", "orders(first:5,").replace("nodes{id name", "nodes{id name confirmationNumber", 1)
+    for query in (body, Q.replace("orders(first:25,", "orders(first:5,")):
+        j = _post({"query": query, "variables": {"q": q, "after": None}})
+        if "errors" not in j: return j["data"]["orders"]["nodes"]
+        print("shopify: /order lookup query failed: " + str(j["errors"])[:200])
+    return []
