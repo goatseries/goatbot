@@ -1,1 +1,1 @@
-../version.py
+VERSION = "v11.1"
