@@ -13,3 +13,9 @@ Commands in the configured chat: /t today, /y yesterday, /w week (Mon start), /m
 
 ## Shopify auth
 Dev Dashboard apps: set SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET. The bot gets a short-lived token via the client credentials grant (POST /admin/oauth/access_token), caches it, refreshes before expiry and on 401. Scopes: read_orders, read_products, read_inventory. The app must be installed on the store. SHOPIFY_ADMIN_TOKEN is an optional static-token fallback.
+
+## COGS
+Per line item: cogs.csv (sku,cogs) overrides first, else Shopify inventory item unit cost (needs read_inventory), else counted as $0 and reported as missing ("cost missing on X of Y line items"). /costs sends a cogs.csv template of every variant sold in the last COSTS_DAYS days (default 90; Shopify only returns orders older than 60 days with the read_all_orders scope). Leave the cogs column blank to use Shopify's cost.
+
+## Shipping cost (limit)
+Shopify's Admin API does not expose the Shopify Shipping label cost per order (checked Nov 2026). Balance-transaction label types exist only for Managed Markets, and label charges are not linked to orders. So shipping uses DEFAULT_SHIPPING_COST (flat per order) until labels move to an app with an API (ShipStation, Shippo, EasyPost). Profit stays "provisional" while it is 0.
