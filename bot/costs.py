@@ -97,7 +97,12 @@ def real_fee(o):
 def filter_status(orders):
     """Keep paid and partially refunded orders (costs.json order_statuses overrides). Orders without status data are kept."""
     allowed = {x.upper() for x in load_config().get("order_statuses", ["PAID", "PARTIALLY_REFUNDED"])}
-    return [o for o in orders if not o.get("displayFinancialStatus") or o["displayFinancialStatus"] in allowed]
+    zero = load_config().get("exclude_zero_total", True)
+    return [o for o in orders if (not o.get("displayFinancialStatus") or o["displayFinancialStatus"] in allowed)
+            and not (zero and is_zero_total(o))]
+def is_zero_total(o):
+    try: return float(o["totalPriceSet"]["shopMoney"]["amount"]) < 0.005
+    except Exception: return False
 def order_costs(o, cogs):
     cfg = load_config()
     gross = float(o["totalPriceSet"]["shopMoney"]["amount"])
@@ -163,15 +168,37 @@ def order_costs(o, cogs):
             "unmapped": unmapped, "assumed_books": assumed_books,
             "units_cost": units_cost, "packaging": pack_cost}
 
+def is_low_price_book(li, r=None):
+    r = r or (load_config().get("wholesale") or {}).get("low_price_book_rule") or {}
+    try: price = float(li["originalUnitPriceSet"]["shopMoney"]["amount"])
+    except Exception: return False
+    blob = " ".join(fields(li)[1])
+    return price <= float(r.get("max_unit_price", 10)) and any(norm(x) in blob for x in r.get("title_contains", []))
+def author_of(li, cfg=None):
+    cfg = load_config() if cfg is None else cfg
+    blob = " ".join(fields(li)[1]); it = classify(li, cfg)
+    if it and it.get("type") == "book":
+        for a in cfg.get("authors", []):
+            if norm(a) in blob: return a
+    return None
+def components(li, cfg=None):
+    """List of author names inside a known bundle, else None."""
+    cfg = load_config() if cfg is None else cfg
+    blob = " ".join(fields(li)[1])
+    for k, v in cfg.get("bundle_components", {}).items():
+        if norm(k) in blob: return v
+    return None
 def _is_ws_line(li, w):
     sku = ((li.get("sku") or (li.get("variant") or {}).get("sku")) or "").strip()
     blob = " ".join(fields(li)[1])
-    return (bool(sku) and any(sku.startswith(x) for x in w.get("sku_prefixes", []))) or \
+    r = w.get("low_price_book_rule") or {}
+    low = bool(r.get("enabled")) and is_low_price_book(li, r)
+    return low or (bool(sku) and any(sku.startswith(x) for x in w.get("sku_prefixes", []))) or \
            any(norm(x) in blob for x in w.get("title_words", []))
 def _is_ws_order(o, w):
     tags = {norm(t) for t in (o.get("tags") or [])}
     if tags & {norm(t) for t in w.get("order_tags", [])}: return True
-    src = norm(o.get("sourceName"))
+    src = (norm(o.get("sourceName")) + " " + norm((o.get("app") or {}).get("name"))).strip()
     return bool(src) and any(norm(x) and norm(x) in src for x in w.get("source_names", []))
 def split_wholesale(orders):
     """(retail_orders, n_excluded). Rule in costs.json wholesale.mixed_order_rule."""
@@ -197,3 +224,29 @@ def config_tag():
     import hashlib
     try: return hashlib.sha1(open(os.environ.get("COSTS_JSON", "costs.json"), "rb").read()).hexdigest()[:7]
     except Exception: return "none"
+
+def wholesale_reason(o):
+    """Why an order counts as wholesale (for /top), or None."""
+    w = load_config().get("wholesale")
+    if not w or w.get("mixed_order_rule") == "include_all": return None
+    tags = {norm(t) for t in (o.get("tags") or [])}
+    hit = tags & {norm(t) for t in w.get("order_tags", [])}
+    if hit: return "order tag " + "/".join(sorted(hit))
+    src = (norm(o.get("sourceName")) + " " + norm((o.get("app") or {}).get("name"))).strip()
+    for x in w.get("source_names", []):
+        if norm(x) and norm(x) in src: return "source/app " + x
+    r = w.get("low_price_book_rule") or {}
+    for li in o["lineItems"]["nodes"]:
+        sku = ((li.get("sku") or (li.get("variant") or {}).get("sku")) or "").strip()
+        if sku and any(sku.startswith(x) for x in w.get("sku_prefixes", [])): return "wholesale SKU"
+        if any(norm(x) in " ".join(fields(li)[1]) for x in w.get("title_words", [])): return "'wholesale' in title"
+        if r.get("enabled") and is_low_price_book(li, r): return "low-price book line (list price <= $%g)" % float(r.get("max_unit_price", 10))
+    return None
+def exclusion_reason(o):
+    """None if the order is counted, else a short reason string."""
+    st = o.get("displayFinancialStatus"); allowed = {x.upper() for x in load_config().get("order_statuses", ["PAID", "PARTIALLY_REFUNDED"])}
+    if st and st not in allowed: return f"status {st}"
+    if load_config().get("exclude_zero_total", True) and is_zero_total(o): return "$0 total (fully discounted)"
+    if split_wholesale([o])[1]: return "wholesale: " + (wholesale_reason(o) or "rule")
+    if o.get("cancelledAt"): return "cancelled"
+    return None
