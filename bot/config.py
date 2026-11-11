@@ -6,6 +6,12 @@ def env(k, d=None, required=False):
     return v
 TG_TOKEN = lambda: env("TELEGRAM_BOT_TOKEN", required=True)
 TG_CHAT = lambda: env("TELEGRAM_CHAT_ID", required=True)
+def TG_CHATS():
+    """Chat ids allowed to send commands. TELEGRAM_CHAT_IDS (comma-separated) overrides;
+    defaults to TELEGRAM_CHAT_ID alone. TELEGRAM_CHAT_ID stays the home chat that receives
+    scheduled scoreboards, sale alerts and the weekly recap."""
+    raw = env("TELEGRAM_CHAT_IDS") or env("TELEGRAM_CHAT_ID", required=True)
+    return [x.strip().strip('"').strip("'") for x in raw.split(",") if x.strip()]
 SHOP = lambda: env("SHOPIFY_SHOP_DOMAIN", required=True)
 SHOP_TOKEN = lambda: env("SHOPIFY_ADMIN_TOKEN")  # optional fallback (static shpat_ token)
 SHOP_CLIENT_ID = lambda: env("SHOPIFY_CLIENT_ID")
