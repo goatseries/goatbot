@@ -89,17 +89,17 @@ def main():
                 except Exception as e:
                     print("weekly recap error:", redact(type(e).__name__ + ": " + str(e))); s["weekly_retry_after"] = time.time() + 600
             s["tg_offset"], reqs = telegram.commands(s.get("tg_offset", 0))
-            for p_ in reqs:
+            for chat_id, p_ in reqs:
                 if p_ == "costs":
                     csv_text, n, n_no, n_un = report.costs_template()
-                    telegram.send_document("cost-mapping.csv", csv_text, f"{n} products/variants from the last {c.COSTS_DAYS} days; {n_un} are not mapped in costs.json, {n_no} have no Shopify cost per item set. Add the unmapped ones to costs.json.")
-                elif p_ == "breakdown": telegram.send(report.breakdown())
-                elif p_.startswith("order "): telegram.send(report.explain_order(p_.split(" ", 1)[1], set(s["seen"])))
+                    telegram.send_document("cost-mapping.csv", csv_text, f"{n} products/variants from the last {c.COSTS_DAYS} days; {n_un} are not mapped in costs.json, {n_no} have no Shopify cost per item set. Add the unmapped ones to costs.json.", chat_id=chat_id)
+                elif p_ == "breakdown": telegram.send(report.breakdown(), chat_id=chat_id)
+                elif p_.startswith("order "): telegram.send(report.explain_order(p_.split(" ", 1)[1], set(s["seen"])), chat_id=chat_id)
                 elif p_ == "top":
-                    for part in report.top_report(): telegram.send(part)
-                elif p_ == "week": telegram.send(report.weekly_recap())
-                elif p_ == "unmapped": telegram.send(report.unmapped_report())
-                else: telegram.send(report.scoreboard(p_))
+                    for part in report.top_report(): telegram.send(part, chat_id=chat_id)
+                elif p_ == "week": telegram.send(report.weekly_recap(), chat_id=chat_id)
+                elif p_ == "unmapped": telegram.send(report.unmapped_report(), chat_id=chat_id)
+                else: telegram.send(report.scoreboard(p_), chat_id=chat_id)
             save(s)
         except Exception as e:
             print("error:", redact(type(e).__name__ + ": " + str(e)))
