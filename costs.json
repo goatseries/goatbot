@@ -277,11 +277,10 @@
     "low_price_book_rule": {
       "enabled": true,
       "title_contains": [
-        "the goat",
         "the g.o.a.t"
       ],
       "max_unit_price": 10.0,
-      "_note": "ON: a 'The GOAT' book line with list price <= max_unit_price (the 9.50 listings) counts as wholesale. Source/app and tags containing 'faire' or 'wholesale' are wholesale too."
+      "_note": "ON: a 'The G.O.A.T.' book line with list price <= max_unit_price (the 9.50 wholesale listings) counts as wholesale. Retail 'The GOAT' items (coloring book $8, tattoo pack $10) do not match. Source/app and tags containing 'faire' or 'wholesale' are wholesale too."
     }
   },
   "order_statuses": [
