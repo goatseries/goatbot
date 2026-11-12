@@ -156,7 +156,7 @@ def scoreboard(period="t"):
     roas = t["revenue"] / ads if ads else 0
     subs = _subs_line(period, start, end, now)
     ws_note = f"\nℹ️ {n_ws} wholesale order(s) excluded" if n_ws else ""
-    mp_note = f"\nℹ️ {len(mp)} marketplace order(s) excluded" if mp else ""
+    mp_note = f"\nℹ️ {len(mp)} Amazon order(s) not counted in retail" if mp else ""
     if undated: mp_note += f" - {undated} Amazon order(s) fetched have an unknown sale date, Amazon figures incomplete"
     _ml = costs.marketplace_line(mp, "this period"); mp_line = ("\n" + _ml) if _ml else ""
     return (f"📊 {label} Scoreboard\nAs of {now.strftime('%b %-d, %-I:%M %p')} ET\n\n"
