@@ -219,6 +219,74 @@ def split_wholesale(orders):
         else: n += 1
     return keep, n
 
+def _mp_cfg():
+    m = load_config().get("marketplace")
+    return m if m and m.get("enabled", True) else None
+def _is_mp_order(o, m):
+    """Marketplace-imported order. Positive evidence only, most specific first:
+    exact order id (registered after inspection), the seller-id auto-tag,
+    then source/app values observed from a real import. Anything else stays counted,
+    including sources never seen before."""
+    oid = (o.get("id") or "").split("/")[-1]
+    if oid and oid in {str(x).split("/")[-1] for x in m.get("order_ids", [])}: return True
+    tags = {norm(t) for t in (o.get("tags") or [])}
+    if tags & {norm(t) for t in m.get("order_tags", [])}: return True
+    src = (norm(o.get("sourceName")) + " " + norm((o.get("app") or {}).get("name"))).strip()
+    return bool(src) and any(norm(x) and norm(x) in src for x in m.get("source_names", []))
+def split_marketplace(orders):
+    """(retail_orders, marketplace_orders). Unlike wholesale this returns the excluded
+    list itself so callers can report separate marketplace revenue from it."""
+    m = _mp_cfg()
+    if not m: return orders, []
+    keep, mp = [], []
+    for o in orders:
+        (mp if _is_mp_order(o, m) else keep).append(o)
+    return keep, mp
+def marketplace_reason(o):
+    """Why an order counts as marketplace, or None."""
+    m = _mp_cfg()
+    if not m: return None
+    oid = (o.get("id") or "").split("/")[-1]
+    if oid and oid in {str(x).split("/")[-1] for x in m.get("order_ids", [])}: return "registered order id"
+    tags = {norm(t) for t in (o.get("tags") or [])}
+    hit = tags & {norm(t) for t in m.get("order_tags", [])}
+    if hit: return "order tag " + "/".join(sorted(hit))
+    src = (norm(o.get("sourceName")) + " " + norm((o.get("app") or {}).get("name"))).strip()
+    for x in m.get("source_names", []):
+        if norm(x) and norm(x) in src: return "source/app " + x
+    return None
+def marketplace_revenue(mp_orders):
+    """Amazon sales figures for excluded marketplace orders. Returns a dict:
+    {orders, valued, unvalued, revenue}. revenue is a definitive dollar total ONLY when
+    every counted order's money fields are actually present and consistent:
+    totalPriceSet, totalRefundedSet and totalTaxSet must exist, and a refunded order must
+    also carry currentTotalTaxSet (refunded tax). Missing tax does NOT prove the marketplace
+    withheld it, and a missing refund field is never zero-filled: such orders make the
+    aggregate unavailable (revenue=None) and are counted in unvalued. Paid statuses only
+    (filter_status), cancelled skipped. Cohort: orders created in the reported period."""
+    n = valued = 0; rev = 0.0
+    for o in filter_status(mp_orders):
+        if o.get("cancelledAt"): continue
+        n += 1
+        def _m(k):
+            try: return float(o[k]["shopMoney"]["amount"])
+            except Exception: return None
+        gross, refunded, tax, cur = _m("totalPriceSet"), _m("totalRefundedSet"), _m("totalTaxSet"), _m("currentTotalTaxSet")
+        if gross is None or refunded is None or tax is None: continue          # unvalued: no fabrication
+        if refunded > 0 and cur is None: continue                              # refunded tax unknown
+        tax_refunded = max(0.0, tax - cur) if cur is not None else 0.0
+        rev += (gross - tax) - max(0.0, refunded - tax_refunded); valued += 1
+    return {"orders": n, "valued": valued, "unvalued": n - valued,
+            "revenue": rev if valued == n and n else (0.0 if n == 0 else None)}
+def marketplace_line(mp_orders, period_label="this period"):
+    """Display line for the excluded marketplace set, or None when there are none."""
+    r = marketplace_revenue(mp_orders)
+    if not r["orders"]: return None
+    if r["revenue"] is None or r["unvalued"]:
+        return (f"🛒 Amazon: {r['orders']} order(s) placed {period_label} - "
+                f"sales unavailable pending amount validation")
+    return (f"🛒 Amazon revenue ${r['revenue']:,.0f} ({r['orders']} orders placed {period_label}, "
+            f"sales ex tax, after refunds, before Amazon fees)")
 def config_tag():
     """Short fingerprint of costs.json so readings can be traced to a config."""
     import hashlib
@@ -247,6 +315,8 @@ def exclusion_reason(o):
     st = o.get("displayFinancialStatus"); allowed = {x.upper() for x in load_config().get("order_statuses", ["PAID", "PARTIALLY_REFUNDED"])}
     if st and st not in allowed: return f"status {st}"
     if load_config().get("exclude_zero_total", True) and is_zero_total(o): return "$0 total (fully discounted)"
+    mr = marketplace_reason(o)
+    if mr: return "marketplace: " + mr
     if split_wholesale([o])[1]: return "wholesale: " + (wholesale_reason(o) or "rule")
     if o.get("cancelledAt"): return "cancelled"
     return None
