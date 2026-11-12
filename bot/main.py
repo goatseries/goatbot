@@ -44,6 +44,24 @@ def new_sale_decision(o, s, keep_ids, max_age_h):
     if age_h <= max_age_h: return "alert"              # genuinely new order
     if o["id"] in s["pending"]: return "alert"         # we saw it unpaid and it has since been paid
     return "seed"                                      # older order that was just touched: never alert
+def marketplace_sale_decision(o, s, max_age_h):
+    """Identified marketplace (Amazon) order. 'alert' only a fresh PAID sale by ORIGINAL
+    marketplace sale time (processedAt); 'seed' silently anything stale, future-dated,
+    undated or cancelled; 'skip' leaves a fresh unpaid order for a later poll. Pending ids
+    are never remembered, so an old imported unpaid order that later flips paid seeds instead
+    of replaying as a new sale."""
+    if o["id"] in s["seen"]: return "skip"
+    if o["cancelledAt"]: return "seed"
+    pa = o.get("processedAt")
+    if not pa: return "seed"                             # original sale date unknown: never alert
+    try: age_h = (datetime.now(timezone.utc) - datetime.fromisoformat(pa.replace("Z", "+00:00"))).total_seconds() / 3600
+    except Exception: return "seed"
+    if age_h < -0.25 or age_h > max_age_h: return "seed"   # future-dated past clock skew, or stale import
+    st = o.get("displayFinancialStatus")
+    if st == "PAID": return "alert"                      # a new sale, nothing else
+    if st in ("PENDING", "AUTHORIZED", "PARTIALLY_PAID", "UNPAID"):
+        return "skip"                                    # fresh but unpaid: re-evaluate next poll
+    return "seed"                                        # REFUNDED / PARTIALLY_REFUNDED / VOIDED / EXPIRED / unknown: never a new-sale alert
 def main():
     s = load()
     fresh = not s["last_poll"]
@@ -60,8 +78,20 @@ def main():
             cogs = costs.load_cogs()
             got = shopify.orders(since, field="updated_at")
             keep_ids = {o["id"] for o in costs.split_wholesale(costs.split_marketplace(got)[0])[0]}  # marketplace first, then wholesale
+            mp_ids = {o["id"] for o in costs.split_marketplace(got)[1]}
             max_age_h = float(os.environ.get("ALERT_MAX_AGE_HOURS", "6"))
             for o in got:
+                if o["id"] in mp_ids:
+                    d = marketplace_sale_decision(o, s, max_age_h)
+                    if d == "alert":
+                        telegram.send(report.amazon_sale_message(o))
+                        print(f"alert (amazon): order {o.get('name')} id {o['id'].split('/')[-1]} status {o.get('displayFinancialStatus')} sold {o.get('processedAt')}")
+                    if d in ("alert", "seed"):
+                        s["seen"].append(o["id"])
+                        if o["id"] in s["pending"]: s["pending"].remove(o["id"])
+                        if d == "seed": print(f"seeded (no alert): order {o.get('name')} status {o.get('displayFinancialStatus')} source {o.get('sourceName')} sold {o.get('processedAt')}")
+                        save(s)   # persist right after each alert/seed
+                    continue
                 d = new_sale_decision(o, s, keep_ids, max_age_h)
                 if d == "alert":
                     telegram.send(report.sale_message(o, cogs))
