@@ -283,7 +283,16 @@
       "_note": "ON: a 'The G.O.A.T.' book line with list price <= max_unit_price (the 9.50 wholesale listings) counts as wholesale. Retail 'The GOAT' items (coloring book $8, tattoo pack $10) do not match. Source/app and tags containing 'faire' or 'wholesale' are wholesale too."
     }
   },
-  "order_statuses": [
+  "marketplace": {
+  "enabled": true,
+  "order_ids": [],
+  "order_tags": [
+   "A1VR1642OHFXP4"
+  ],
+  "source_names": [],
+  "_note": "Marketplace Connect imports. Excluded from revenue, costs, profit, order counts, the sale feed, /costs, /unmapped and /top, like wholesale; reported separately as Amazon revenue (no profit math). Positive evidence only: (1) order_tags holds ONLY the seller-id tag (A1VR1642OHFXP4) - generic MC tags ('Amazon', 'Amazon US', 'FBA/FBM') are not exclusion evidence, they corroborate; (2) order_ids for exact Shopify order ids registered AFTER a controlled import is inspected (the id does not exist before the import); (3) source_names filled only from observed attribution of a real imported order."
+ },
+ "order_statuses": [
     "PAID",
     "PARTIALLY_REFUNDED"
   ],
