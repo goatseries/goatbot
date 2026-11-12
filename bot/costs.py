@@ -285,8 +285,7 @@ def marketplace_line(mp_orders, period_label="this period"):
     if r["revenue"] is None or r["unvalued"]:
         return (f"🛒 Amazon: {r['orders']} order(s) placed {period_label} - "
                 f"sales unavailable pending amount validation")
-    return (f"🛒 Amazon revenue ${r['revenue']:,.0f} ({r['orders']} orders placed {period_label}, "
-            f"sales ex tax, after refunds, before Amazon fees)")
+    return f"🛒 Amazon revenue ${r['revenue']:,.0f}"
 def config_tag():
     """Short fingerprint of costs.json so readings can be traced to a config."""
     import hashlib
