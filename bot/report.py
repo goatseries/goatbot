@@ -18,6 +18,18 @@ def sale_message(o, cogs):
     if u.get("source"): lines.append(f"📣 {u['source']}" + (f"  🎨 {u['content']}" if u.get("content") else ""))
     if u.get("campaign"): lines.append(f"📱 {u['campaign']}")
     return "\n".join(lines)
+def amazon_sale_message(o):
+    """Alert for a fresh Amazon (marketplace) sale. Shows only the validated order amount
+    (ex tax, after refunds, before Amazon fees) - Amazon fees/profit are unknown and never
+    estimated. Timestamp is the original marketplace sale time (processedAt)."""
+    r = costs.marketplace_revenue([o])                 # same validated math as the scoreboard line
+    amt = r["revenue"] if r["valued"] == 1 else None   # None when any money field is missing/inconsistent
+    price = f"${amt:.2f}" if amt is not None else "amount unavailable pending validation"
+    lines = [f"\U0001f6d2 AMAZON SALE - {price} (excl. tax, before Amazon fees)", "",
+        f"\U0001f9fe {o.get('name', '?')} · Amazon · {o.get('displayFinancialStatus', '?')}",
+        f"\U0001f552 sold {_when(o.get('processedAt'))}", "",
+        "\U0001f4e6 " + ", ".join(f"{l['title']} x{l['quantity']}" for l in o["lineItems"]["nodes"])]
+    return "\n".join(lines)
 def explain_order(name, seen=()):
     """Debug text for one order: would it be counted, and would the sale feed alert on it. No customer details."""
     found = shopify.find_order(name)
@@ -92,11 +104,36 @@ def _subs_line(period, start, end, now):
         return f"\n📧 New subscribers {cur}"
     except Exception as e:
         print("subs line error: " + type(e).__name__); return ""
+def _valid_pa(o, tz):
+    """Order's original marketplace sale time in ET, or None when processedAt is missing/malformed."""
+    pa = o.get("processedAt")
+    if not pa: return None
+    try: return datetime.fromisoformat(str(pa).replace("Z", "+00:00")).astimezone(tz)
+    except Exception: return None
+def _mp_cohort(start, end):
+    """Marketplace (Amazon) orders by ORIGINAL marketplace sale time. Shopify's processedAt is
+    when the marketplace order was actually placed (verified on live import #1653: processedAt
+    2026-11-11T14:43:03Z = the marketplace order's placement time; createdAt was the import time).
+    Fetched with its own processed_at query, independent of the retail created_at window, so an
+    order imported late still lands in its true period. `end` is a TRUE-EXCLUSIVE bound (unlike
+    _range's inclusive last-second retail end): half-open [start, end), ET. An order without a
+    valid processedAt cannot be dated and is excluded rather than re-dated to import time."""
+    tz = ZoneInfo(c.TZ); utc = ZoneInfo("UTC"); f = "%Y-%m-%dT%H:%M:%SZ"
+    q_end = end.astimezone(utc).strftime(f) if end else None
+    got = shopify.orders(start.astimezone(utc).strftime(f), q_end, field="processed_at")
+    out = []
+    for o in costs.split_marketplace(got)[1]:
+        d = _valid_pa(o, tz)
+        if d is not None and d >= start and (end is None or d < end): out.append(o)
+    return out
 def scoreboard(period="t"):
     start, end, label, now = _range(period)
     utc = ZoneInfo("UTC"); f = "%Y-%m-%dT%H:%M:%SZ"
     os_ = shopify.orders(start.astimezone(utc).strftime(f), end.astimezone(utc).strftime(f) if end else None)
-    os_, mp = costs.split_marketplace(os_)
+    os_, mp_seen = costs.split_marketplace(os_)
+    # _range's end is the inclusive last second for retail; the cohort needs a true-exclusive bound
+    mp = _mp_cohort(start, end + timedelta(seconds=1) if end else None)   # by original marketplace sale date
+    undated = sum(1 for o in mp_seen if _valid_pa(o, ZoneInfo(c.TZ)) is None)
     os_, n_ws = costs.split_wholesale(os_)
     cogs = costs.load_cogs()
     t = dict(revenue=0, fees=0, cogs=0, shipping=0, returns=0, units_cost=0, packaging=0)
@@ -120,6 +157,7 @@ def scoreboard(period="t"):
     subs = _subs_line(period, start, end, now)
     ws_note = f"\nℹ️ {n_ws} wholesale order(s) excluded" if n_ws else ""
     mp_note = f"\nℹ️ {len(mp)} marketplace order(s) excluded" if mp else ""
+    if undated: mp_note += f" - {undated} Amazon order(s) fetched have an unknown sale date, Amazon figures incomplete"
     _ml = costs.marketplace_line(mp, "this period"); mp_line = ("\n" + _ml) if _ml else ""
     return (f"📊 {label} Scoreboard\nAs of {now.strftime('%b %-d, %-I:%M %p')} ET\n\n"
         f"💰 Profit ${profit:,.0f} ({roi:.1f}% ROI)\n💵 Revenue ${t['revenue']:,.0f} ({roas:.2f}x)\n"
@@ -231,9 +269,9 @@ def weekly_recap():
     w1, w0 = mon - timedelta(days=7), mon - timedelta(days=14)     # w1 = last week start, w0 = week before
     f = "%Y-%m-%dT%H:%M:%SZ"
     allo = shopify.orders(w0.astimezone(utc).strftime(f), (mon - timedelta(seconds=1)).astimezone(utc).strftime(f))
-    allo, mp_all = costs.split_marketplace(allo); allo, _ = costs.split_wholesale(allo); cogs = costs.load_cogs()
+    allo = costs.split_marketplace(allo)[0]; allo, _ = costs.split_wholesale(allo); cogs = costs.load_cogs()
     def created(o): return datetime.fromisoformat(o["createdAt"].replace("Z", "+00:00")).astimezone(tz)
-    mp_wk = [o for o in mp_all if w1 <= created(o) < mon]
+    mp_wk = _mp_cohort(w1, mon)          # by original marketplace sale date, not import date
     a = _week_totals([o for o in allo if w1 <= created(o) < mon], cogs)
     b = _week_totals([o for o in allo if w0 <= created(o) < w1], cogs)
     day = lambda d: d.strftime("%Y-%m-%d")
