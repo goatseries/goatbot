@@ -262,17 +262,26 @@ def marketplace_revenue(mp_orders):
     totalPriceSet, totalRefundedSet and totalTaxSet must exist, and a refunded order must
     also carry currentTotalTaxSet (refunded tax). Missing tax does NOT prove the marketplace
     withheld it, and a missing refund field is never zero-filled: such orders make the
-    aggregate unavailable (revenue=None) and are counted in unvalued. Paid statuses only
-    (filter_status), cancelled skipped. Cohort: orders created in the reported period."""
+    aggregate unavailable (revenue=None) and are counted in unvalued. A paid order whose
+    gross is zero is also unvalidated: zero monetary fields on a paid import cannot be
+    distinguished from a connector that lacks the order's money data, so a reported 0 is
+    never treated as a real $0 sale; it is counted in orders/unvalued, never as revenue. Eligibility is marketplace-specific
+    (status allowlist only, cancelled skipped) and deliberately does NOT reuse the retail
+    filter, whose zero-total exclusion would silently hide these orders from the count.
+    Cohort: orders created in the reported period."""
     n = valued = 0; rev = 0.0
-    for o in filter_status(mp_orders):
+    allowed = {x.upper() for x in load_config().get("order_statuses", ["PAID", "PARTIALLY_REFUNDED"])}
+    for o in mp_orders:
         if o.get("cancelledAt"): continue
+        st = o.get("displayFinancialStatus")
+        if st and st.upper() not in allowed: continue
         n += 1
         def _m(k):
             try: return float(o[k]["shopMoney"]["amount"])
             except Exception: return None
         gross, refunded, tax, cur = _m("totalPriceSet"), _m("totalRefundedSet"), _m("totalTaxSet"), _m("currentTotalTaxSet")
         if gross is None or refunded is None or tax is None: continue          # unvalued: no fabrication
+        if gross <= 0: continue                                                # zero-filled paid import: unvalidated, not a real $0 sale
         if refunded > 0 and cur is None: continue                              # refunded tax unknown
         tax_refunded = max(0.0, tax - cur) if cur is not None else 0.0
         rev += (gross - tax) - max(0.0, refunded - tax_refunded); valued += 1
