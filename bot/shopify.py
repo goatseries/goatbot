@@ -26,7 +26,7 @@ def _post(body):
 Q = """
 query($q:String!,$after:String){orders(first:25,after:$after,query:$q,sortKey:CREATED_AT){
  pageInfo{hasNextPage endCursor}
- nodes{id name createdAt updatedAt test cancelledAt closed tags sourceName
+ nodes{id name createdAt processedAt updatedAt test cancelledAt closed tags sourceName
   displayFinancialStatus totalPriceSet{shopMoney{amount}} totalTaxSet{shopMoney{amount}} currentTotalTaxSet{shopMoney{amount}} totalRefundedSet{shopMoney{amount}}
   app{name}
   transactions(first:10){kind status gateway fees{amount{amount} taxAmount{amount}}}
@@ -49,7 +49,9 @@ def orders(since_iso, until_iso=None, field="created_at"):
     q = f"{field}:>='{since_iso}'" + (f" {field}:<='{until_iso}'" if until_iso else "")
     out, after = [], None
     while True:
-        j = _post({"query": _build(Q, _dropped), "variables": {"q": q, "after": after}})
+        gql = _build(Q, _dropped)  # rebuilt each pass so app/transactions drops apply on retry
+        if field == "processed_at": gql = gql.replace("sortKey:CREATED_AT", "sortKey:PROCESSED_AT")  # match sort to date field (2025-10)
+        j = _post({"query": gql, "variables": {"q": q, "after": after}})
         if "errors" in j:
             msg = str(j["errors"])[:200]
             blk = "app" if ("app" in msg.lower() and "app" not in _dropped) else ("transactions" if "transactions" not in _dropped else None)
