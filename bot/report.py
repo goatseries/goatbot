@@ -32,6 +32,7 @@ def explain_order(name, seen=()):
         if st and st not in allowed: why.append(f"status {st} not counted")
         if costs.load_config().get("exclude_zero_total", True) and costs.is_zero_total(o): why.append("$0 total (fully discounted)")
         if not costs.filter_status([o]): pass
+        if costs.marketplace_reason(o): why.append("marketplace: " + costs.marketplace_reason(o))
         kept, n_ws = costs.split_wholesale([o])
         if n_ws: why.append("wholesale: " + (costs.wholesale_reason(o) or "rule"))
         age_days = (datetime.now(ZoneInfo("UTC")) - datetime.fromisoformat(o["createdAt"].replace("Z", "+00:00"))).days
@@ -67,7 +68,7 @@ def unmapped_report(days=None):
     days = days or c.COSTS_DAYS
     since = (datetime.now(ZoneInfo("UTC")) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
     cfg = costs.load_config(); seen = {}
-    for o in costs.split_wholesale(shopify.orders(since))[0]:
+    for o in costs.split_wholesale(costs.split_marketplace(shopify.orders(since))[0])[0]:
         for li in o["lineItems"]["nodes"]:
             if costs.classify(li, cfg): continue
             sku, texts, ptype, tags = costs.fields(li); p = li.get("product") or {}
@@ -95,6 +96,7 @@ def scoreboard(period="t"):
     start, end, label, now = _range(period)
     utc = ZoneInfo("UTC"); f = "%Y-%m-%dT%H:%M:%SZ"
     os_ = shopify.orders(start.astimezone(utc).strftime(f), end.astimezone(utc).strftime(f) if end else None)
+    os_, mp = costs.split_marketplace(os_)
     os_, n_ws = costs.split_wholesale(os_)
     cogs = costs.load_cogs()
     t = dict(revenue=0, fees=0, cogs=0, shipping=0, returns=0, units_cost=0, packaging=0)
@@ -117,15 +119,17 @@ def scoreboard(period="t"):
     roas = t["revenue"] / ads if ads else 0
     subs = _subs_line(period, start, end, now)
     ws_note = f"\nℹ️ {n_ws} wholesale order(s) excluded" if n_ws else ""
+    mp_note = f"\nℹ️ {len(mp)} marketplace order(s) excluded" if mp else ""
+    _ml = costs.marketplace_line(mp, "this period"); mp_line = ("\n" + _ml) if _ml else ""
     return (f"📊 {label} Scoreboard\nAs of {now.strftime('%b %-d, %-I:%M %p')} ET\n\n"
         f"💰 Profit ${profit:,.0f} ({roi:.1f}% ROI)\n💵 Revenue ${t['revenue']:,.0f} ({roas:.2f}x)\n"
-        f"💸 Ads ${ads:,.0f} · Costs ${costs_total:,.0f}\n💳 Orders {len(os_)}{subs}{ws_note}\n🔧 {VERSION} · costs.json {costs.config_tag()}")
+        f"💸 Ads ${ads:,.0f} · Costs ${costs_total:,.0f}\n💳 Orders {len(os_)}{subs}{ws_note}{mp_note}{mp_line}\n🔧 {VERSION} · costs.json {costs.config_tag()}")
 def creative_report(days=7):
     tz = ZoneInfo(c.TZ); end = datetime.now(tz); start = end - timedelta(days=days - 1)
     os_ = shopify.orders((start.replace(hour=0, minute=0, second=0).astimezone(ZoneInfo("UTC"))).strftime("%Y-%m-%dT%H:%M:%SZ"))
     sp = meta.spend_by_ad(start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"))
     sales = {}
-    for o in os_:
+    for o in costs.split_marketplace(os_)[0]:
         u = _utm(o); key = u.get("content") or "unknown"
         s = sales.setdefault(key, [0, 0.0]); s[0] += 1; s[1] += float(o["totalPriceSet"]["shopMoney"]["amount"])
     rows = sorted(sales.items(), key=lambda kv: -kv[1][0])
@@ -140,7 +144,7 @@ def costs_template(days=None):
     days = days or c.COSTS_DAYS
     since = (datetime.now(ZoneInfo("UTC")) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
     cfg = costs.load_config(); cogs = costs.load_cogs(); rows = {}
-    for o in costs.split_wholesale(shopify.orders(since))[0]:
+    for o in costs.split_wholesale(costs.split_marketplace(shopify.orders(since))[0])[0]:
         for li in o["lineItems"]["nodes"]:
             k = costs.line_key(li); v = li.get("variant") or {}
             it = costs.classify(li, cfg); u = costs.unit_cost(li, cogs, cfg)  # noqa
@@ -163,7 +167,8 @@ def breakdown(period="t"):
     start, end, label, now = _range(period)
     utc = ZoneInfo("UTC"); f = "%Y-%m-%dT%H:%M:%SZ"
     os_ = shopify.orders(start.astimezone(utc).strftime(f), end.astimezone(utc).strftime(f) if end else None)
-    n_all = len(os_); n_st = n_all - len(costs.filter_status(os_)); os_, n_ws = costs.split_wholesale(os_)
+    n_all = len(os_); os_, mp = costs.split_marketplace(os_); n_mp = len(mp)
+    n_st = len(os_) - len(costs.filter_status(os_)); os_, n_ws = costs.split_wholesale(os_)
     cogs = costs.load_cogs(); t = dict(revenue=0, fees=0, units_cost=0, packaging=0, shipping=0, returns=0); n = n_can = n_un = n_real = 0; tax_total = 0.0
     for o in os_:
         if o["cancelledAt"]: n_can += 1; continue
@@ -172,7 +177,7 @@ def breakdown(period="t"):
     tot = t["fees"] + t["units_cost"] + t["packaging"] + t["shipping"] + t["returns"]
     return (f"🔎 {label} breakdown ({VERSION}, costs.json {costs.config_tag()})\n"
         f"Window start {start.strftime('%b %-d %-I:%M %p')} ET, as of {now.strftime('%-I:%M %p')} ET\n"
-        f"Orders counted {n} · cancelled skipped {n_can} · wholesale excluded {n_ws} · status/$0-total excluded {n_st} · fetched {n_all}\n"
+        f"Orders counted {n} · cancelled skipped {n_can} · marketplace excluded {n_mp} · wholesale excluded {n_ws} · status/$0-total excluded {n_st} · fetched {n_all}\n"
         f"Revenue ${t['revenue']:,.2f} (excludes tax ${tax_total:,.2f})\nFees ${t['fees']:,.2f} (real on {n_real} of {n} orders, estimate on the rest) · Products ${t['units_cost']:,.2f} · Packaging ${t['packaging']:,.2f}\n"
         f"Labels ${t['shipping']:,.2f} · Returns ${t['returns']:,.2f}\nCosts total ${tot:,.2f} (ads not included)\n"
         f"Line items without a cost: {n_un} (see /unmapped)")
@@ -226,8 +231,9 @@ def weekly_recap():
     w1, w0 = mon - timedelta(days=7), mon - timedelta(days=14)     # w1 = last week start, w0 = week before
     f = "%Y-%m-%dT%H:%M:%SZ"
     allo = shopify.orders(w0.astimezone(utc).strftime(f), (mon - timedelta(seconds=1)).astimezone(utc).strftime(f))
-    allo, _ = costs.split_wholesale(allo); cogs = costs.load_cogs()
+    allo, mp_all = costs.split_marketplace(allo); allo, _ = costs.split_wholesale(allo); cogs = costs.load_cogs()
     def created(o): return datetime.fromisoformat(o["createdAt"].replace("Z", "+00:00")).astimezone(tz)
+    mp_wk = [o for o in mp_all if w1 <= created(o) < mon]
     a = _week_totals([o for o in allo if w1 <= created(o) < mon], cogs)
     b = _week_totals([o for o in allo if w0 <= created(o) < w1], cogs)
     day = lambda d: d.strftime("%Y-%m-%d")
@@ -244,6 +250,8 @@ def weekly_recap():
          f"🎯 ROAS {a['roas']:.2f}x · was {b['roas']:.2f}x",
          f"🧾 Costs ${a['costs']:,.0f} · {_chg(a['costs'], b['costs'])}",
          f"💳 Orders {a['orders']} · {_chg(a['orders'], b['orders'], money=False)}"]
+    _ml = costs.marketplace_line(mp_wk, "last week")
+    if _ml: L.append(_ml)
     if subs[0] is not None and subs[1] is not None: L.append(f"📧 New subscribers {subs[0]} · {_chg(subs[0], subs[1], money=False)}")
     elif subs[0] is not None: L.append(f"📧 New subscribers {subs[0]}")
     view = os.environ.get("TOP_VIEW", "books").lower()
@@ -265,7 +273,7 @@ def top_report():
     mon = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=now.weekday()); w1 = mon - timedelta(days=7)
     f = "%Y-%m-%dT%H:%M:%SZ"
     allo = shopify.orders(w1.astimezone(utc).strftime(f), (mon - timedelta(seconds=1)).astimezone(utc).strftime(f))
-    n_all = len(allo); paid = costs.filter_status(allo); kept, n_ws = costs.split_wholesale(allo)
+    n_all = len(allo); paid = costs.filter_status(allo); kept, mp = costs.split_marketplace(allo); n_mp = len(mp); kept, n_ws = costs.split_wholesale(kept)
     n_canc = sum(1 for o in kept if o["cancelledAt"]); used = [o for o in kept if not o["cancelledAt"]]
     a = _week_totals(used, costs.load_cogs())
     low_o = low_u = 0
@@ -276,7 +284,7 @@ def top_report():
     for o in allo: st[o.get("displayFinancialStatus")] = st.get(o.get("displayFinancialStatus"), 0) + 1
     L = [f"🔎 Top sellers {w1.strftime('%b %-d')}-{(mon - timedelta(days=1)).strftime('%b %-d')} (ET)",
          f"Orders fetched {n_all} ({', '.join(f'{k} {v}' for k, v in sorted(st.items(), key=lambda kv: str(kv[0])))})",
-         f"Counted {len(used)} (paid/partially refunded, not $0, not wholesale) · wholesale excluded {n_ws} · cancelled {n_canc}",
+         f"Counted {len(used)} (paid/partially refunded, not $0, not wholesale/marketplace) · marketplace excluded {n_mp} · wholesale excluded {n_ws} · cancelled {n_canc}",
          f"Low-price book lines (list price <= ${(costs.load_config().get('wholesale') or {}).get('low_price_book_rule', {}).get('max_unit_price', 10):g}): {low_u} units in {low_o} orders, "
          + ("EXCLUDED as wholesale" if ((costs.load_config().get('wholesale') or {}).get('low_price_book_rule') or {}).get('enabled') else "still counted (rule off)"), "",
          "1) As sold (bundles are their own products), units · list revenue"]
