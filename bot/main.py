@@ -40,7 +40,7 @@ def new_sale_decision(o, s, keep_ids, max_age_h):
     if st in ("PENDING", "AUTHORIZED", "PARTIALLY_PAID", "UNPAID"):
         if age_h <= 24 * 7 and o["id"] not in s["pending"]: s["pending"].append(o["id"])
         return "skip"
-    if o["id"] not in keep_ids: return "seed"         # wholesale, voided, refunded etc.
+    if o["id"] not in keep_ids: return "seed"         # marketplace, wholesale, voided, refunded etc.
     if age_h <= max_age_h: return "alert"              # genuinely new order
     if o["id"] in s["pending"]: return "alert"         # we saw it unpaid and it has since been paid
     return "seed"                                      # older order that was just touched: never alert
@@ -59,7 +59,7 @@ def main():
             since = (datetime.fromisoformat(s["last_poll"]) - timedelta(minutes=0 if fresh else 5)).strftime("%Y-%m-%dT%H:%M:%SZ")
             cogs = costs.load_cogs()
             got = shopify.orders(since, field="updated_at")
-            keep_ids = {o["id"] for o in costs.split_wholesale(got)[0]}
+            keep_ids = {o["id"] for o in costs.split_wholesale(costs.split_marketplace(got)[0])[0]}  # marketplace first, then wholesale
             max_age_h = float(os.environ.get("ALERT_MAX_AGE_HOURS", "6"))
             for o in got:
                 d = new_sale_decision(o, s, keep_ids, max_age_h)
