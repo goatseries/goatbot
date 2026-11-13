@@ -101,8 +101,8 @@ def _subs_line(period, start, end, now):
         if period in ("t", "y"):
             prev = klaviyo.new_profiles((start - day).astimezone(utc), start.astimezone(utc))
             if prev is not None:
-                return f"\n📧 New subscribers {cur} (prev {prev})"
-        return f"\n📧 New subscribers {cur}"
+                return f"\n📧 New contacts {cur} (prev {prev})"
+        return f"\n📧 New contacts {cur}"
     except Exception as e:
         print("subs line error: " + type(e).__name__); return ""
 def _valid_pa(o, tz):
@@ -345,8 +345,8 @@ def weekly_recap():
          f"🎵 TikTok sales ${tt_revenue:,.0f} (included)"]
     _ml = _compact_marketplace(mp_wk)
     if _ml: L.append(_ml)
-    if subs[0] is not None and subs[1] is not None: L.append(f"📧 New subscribers {subs[0]} · {_chg(subs[0], subs[1], money=False)}")
-    elif subs[0] is not None: L.append(f"📧 New subscribers {subs[0]}")
+    if subs[0] is not None and subs[1] is not None: L.append(f"📧 New contacts {subs[0]} · {_chg(subs[0], subs[1], money=False)}")
+    elif subs[0] is not None: L.append(f"📧 New contacts {subs[0]}")
     view = os.environ.get("TOP_VIEW", "books").lower()
     if view not in ("sold", "books"): view = "books"
     rows = _rank(a, view, 5)
