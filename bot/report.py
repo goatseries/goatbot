@@ -1,8 +1,9 @@
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 import os
+import math
 from .version import VERSION
-from . import config as c, shopify, meta, costs, klaviyo
+from . import config as c, shopify, meta, costs, klaviyo, tiktok
 def _utm(o):
     v = ((o.get("customerJourneySummary") or {}).get("lastVisit") or {}).get("utmParameters") or {}
     return v
@@ -126,6 +127,41 @@ def _mp_cohort(start, end):
         d = _valid_pa(o, tz)
         if d is not None and d >= start and (end is None or d < end): out.append(o)
     return out
+def _ad_totals(start, end, now):
+    """Separate reported sources; unknown spend never becomes zero."""
+    result = {"meta": None, "tiktok": None, "total": None, "note": ""}
+    try:
+        account = meta._get(c.META_ACCT(), {"fields": "currency,timezone_name"})
+        if account.get("currency") != "USD" or account.get("timezone_name") != c.TZ:
+            raise ValueError("Meta account currency or timezone mismatch")
+        amount = meta.spend(start.strftime("%Y-%m-%d"), (end - timedelta(microseconds=1)).strftime("%Y-%m-%d"), strict=True)
+        if amount < 0 or not math.isfinite(amount):
+            raise ValueError("Meta spend invalid")
+        result["meta"] = amount
+    except Exception:
+        result["note"] = "Meta spend unavailable"
+    try:
+        snap = tiktok.spend(start, end, now)
+        result["tiktok"] = float(snap["amount"])
+        fetched = snap["fetched_at"].astimezone(ZoneInfo(c.TZ))
+        result["note"] += ("; " if result["note"] else "") + "TikTok fetched " + fetched.strftime("%b %-d %-I:%M %p") + " ET; spend may lag or be revised"
+    except Exception as exc:
+        # Only our fixed, non-provider error messages may be displayed.
+        detail = str(exc) if isinstance(exc, tiktok.Unavailable) else "TikTok spend unavailable"
+        result["note"] += ("; " if result["note"] else "") + detail
+    if result["meta"] is not None and result["tiktok"] is not None:
+        result["total"] = result["meta"] + result["tiktok"]
+    return result
+
+def _tagged_tiktok(orders, cogs):
+    """A labeled Shopify last-visit UTM subset, never added to website total."""
+    tagged = [o for o in orders if not o.get("cancelledAt") and str(_utm(o).get("source") or "").strip().lower() == "tiktok"]
+    return sum(costs.order_costs(o, cogs)["revenue"] for o in tagged), len(tagged)
+
+def _spend_line(ad):
+    fmt = lambda v: f"${v:,.2f}" if v is not None else "unavailable"
+    return f"Meta {fmt(ad['meta'])} + TikTok {fmt(ad['tiktok'])} = Ads {fmt(ad['total'])}"
+
 def scoreboard(period="t"):
     start, end, label, now = _range(period)
     utc = ZoneInfo("UTC"); f = "%Y-%m-%dT%H:%M:%SZ"
@@ -149,19 +185,27 @@ def scoreboard(period="t"):
         lines += k["lines"]; lines_miss += len(k["missing_cogs"])
         if k["missing_cogs"]: n_miss += 1
         else: n_ok += 1
-    ads = meta.spend(start.strftime("%Y-%m-%d"), (end or now).strftime("%Y-%m-%d"))
+    ad = _ad_totals(start, end + timedelta(seconds=1) if end else now, now)
+    ads = ad["total"]
+    tt_revenue, tt_orders = _tagged_tiktok(os_, cogs)
     costs_total = t["fees"] + t["cogs"] + t["shipping"] + t["returns"]
-    profit = t["revenue"] - ads - costs_total
-    roi = profit / (ads + costs_total) * 100 if (ads + costs_total) else 0
-    roas = t["revenue"] / ads if ads else 0
+    profit = t["revenue"] - ads - costs_total if ads is not None else None
+    roi = profit / (ads + costs_total) * 100 if ads is not None and (ads + costs_total) else 0
+    roas = t["revenue"] / ads if ads else None
+    profit_line = f"Profit ${profit:,.0f} ({roi:.1f}% ROI)" if profit is not None else "Profit / ROI unavailable: ad spend incomplete"
+    roas_text = f" ({roas:.2f}x blended ROAS)" if roas is not None else " (blended ROAS unavailable)"
     subs = _subs_line(period, start, end, now)
     ws_note = f"\nℹ️ {n_ws} wholesale order(s) excluded" if n_ws else ""
     mp_note = f"\nℹ️ {len(mp)} Amazon order(s) not counted in retail" if mp else ""
     if undated: mp_note += f" - {undated} Amazon order(s) fetched have an unknown sale date, Amazon figures incomplete"
     _ml = costs.marketplace_line(mp, "this period"); mp_line = ("\n" + _ml) if _ml else ""
     return (f"📊 {label} Scoreboard\nAs of {now.strftime('%b %-d, %-I:%M %p')} ET\n\n"
-        f"💰 Profit ${profit:,.0f} ({roi:.1f}% ROI)\n💵 Revenue ${t['revenue']:,.0f} ({roas:.2f}x)\n"
-        f"💸 Ads ${ads:,.0f} · Costs ${costs_total:,.0f}\n💳 Orders {len(os_)}{subs}{ws_note}{mp_note}{mp_line}\n🔧 {VERSION} · costs.json {costs.config_tag()}")
+        f"💰 {profit_line}\n💵 Website revenue ${t['revenue']:,.0f}{roas_text}\n"
+        f"💸 {_spend_line(ad)}\nCosts ${costs_total:,.0f}\n"
+        f"TikTok-tagged website revenue ${tt_revenue:,.2f} ({tt_orders} matched orders)\n"
+        f"Last-visit utm_source=tiktok subset only, not full ad attribution; already included in website revenue.\n"
+        f"💳 Orders {len(os_)}{subs}{ws_note}{mp_note}{mp_line}\n"
+        f"ℹ️ {ad['note']}\n🔧 {VERSION} · costs.json {costs.config_tag()}")
 def creative_report(days=7):
     tz = ZoneInfo(c.TZ); end = datetime.now(tz); start = end - timedelta(days=days - 1)
     os_ = shopify.orders((start.replace(hour=0, minute=0, second=0).astimezone(ZoneInfo("UTC"))).strftime("%Y-%m-%dT%H:%M:%SZ"))
@@ -274,18 +318,29 @@ def weekly_recap():
     mp_wk = _mp_cohort(w1, mon)          # by original marketplace sale date, not import date
     a = _week_totals([o for o in allo if w1 <= created(o) < mon], cogs)
     b = _week_totals([o for o in allo if w0 <= created(o) < w1], cogs)
-    day = lambda d: d.strftime("%Y-%m-%d")
     for t_, s_, e_ in ((a, w1, mon - timedelta(days=1)), (b, w0, w1 - timedelta(days=1))):
-        t_["ads"] = meta.spend(day(s_), day(e_)); t_["profit"] = t_["revenue"] - t_["ads"] - t_["costs"]
-        t_["roas"] = t_["revenue"] / t_["ads"] if t_["ads"] else 0
-        t_["roi"] = t_["profit"] / (t_["ads"] + t_["costs"]) * 100 if (t_["ads"] + t_["costs"]) else 0
+        t_["ad"] = _ad_totals(s_, e_ + timedelta(days=1), now)
+        t_["ads"] = t_["ad"]["total"]
+        t_["profit"] = t_["revenue"] - t_["ads"] - t_["costs"] if t_["ads"] is not None else None
+        t_["roas"] = t_["revenue"] / t_["ads"] if t_["ads"] else None
+        t_["roi"] = t_["profit"] / (t_["ads"] + t_["costs"]) * 100 if t_["ads"] is not None and (t_["ads"] + t_["costs"]) else 0
     subs = [klaviyo.new_profiles(w1.astimezone(utc), mon.astimezone(utc)), klaviyo.new_profiles(w0.astimezone(utc), w1.astimezone(utc))]
     rng = lambda s_, e_: f"{s_.strftime('%b %-d')}-{e_.strftime('%b %-d')}"
-    L = [f"📅 Weekly recap {rng(w1, mon - timedelta(days=1))}", f"vs {rng(w0, w1 - timedelta(days=1))}", "",
-         f"💰 Profit ${a['profit']:,.0f} ({a['roi']:.1f}% ROI) · {_chg(a['profit'], b['profit'], plain=True)} (was ${b['profit']:,.0f})",
-         f"💵 Revenue ${a['revenue']:,.0f} · {_chg(a['revenue'], b['revenue'])}",
-         f"💸 Ads ${a['ads']:,.0f} · {_chg(a['ads'], b['ads'])}",
-         f"🎯 ROAS {a['roas']:.2f}x · was {b['roas']:.2f}x",
+    complete = a['ads'] is not None and b['ads'] is not None
+    roas_fmt = lambda value: f"{value:.2f}x" if value is not None else "unavailable"
+    financial = [
+        f"💰 Profit ${a['profit']:,.0f} ({a['roi']:.1f}% ROI) · {_chg(a['profit'], b['profit'], plain=True)} (was ${b['profit']:,.0f})",
+        f"💸 Ads ${a['ads']:,.2f} · {_chg(a['ads'], b['ads'])}",
+        f"🎯 Blended ROAS {roas_fmt(a['roas'])} · was {roas_fmt(b['roas'])}"] if complete else ["Profit / ROI / ROAS comparison unavailable: ad spend incomplete"]
+    tt_revenue, tt_orders = _tagged_tiktok([o for o in allo if w1 <= created(o) < mon], cogs)
+    L = [f"📅 Weekly recap {rng(w1, mon - timedelta(days=1))}", f"vs {rng(w0, w1 - timedelta(days=1))}", ""] + financial + [
+         f"💵 Website revenue ${a['revenue']:,.0f} · {_chg(a['revenue'], b['revenue'])}",
+         _spend_line(a['ad']),
+         f"TikTok-tagged website revenue ${tt_revenue:,.2f} ({tt_orders} matched orders)",
+         "Last-visit utm_source=tiktok subset only, not full ad attribution; already included in website revenue.",
+         "ℹ️ " + a['ad']['note'],
+         "Prior week: " + _spend_line(b['ad']),
+         "ℹ️ Prior week: " + b['ad']['note'],
          f"🧾 Costs ${a['costs']:,.0f} · {_chg(a['costs'], b['costs'])}",
          f"💳 Orders {a['orders']} · {_chg(a['orders'], b['orders'], money=False)}"]
     _ml = costs.marketplace_line(mp_wk, "last week")
