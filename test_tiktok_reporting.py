@@ -189,20 +189,20 @@ class ReportingTests(unittest.TestCase):
         costs={'revenue':100,'fees':2,'cogs':20,'shipping':3,'returns':0,'units_cost':18,'packaging':2,'unmapped':[],'assumed_books':[],'tags':[],'lines':1,'missing_cogs':[]}
         ad={'total':12.02,'meta':10,'tiktok':2.02,'note':'TikTok fetched 1:38 PM; may lag'}
         with patch.object(report,'_range',return_value=(start,None,'Today',now)),patch.object(report.shopify,'orders',return_value=[order]),patch.object(report.costs,'split_marketplace',return_value=([order],[])),patch.object(report.costs,'split_wholesale',return_value=([order],0)),patch.object(report,'_mp_cohort',return_value=[]),patch.object(report.costs,'load_cogs',return_value={}),patch.object(report.costs,'order_costs',return_value=costs),patch.object(report,'_subs_line',return_value=''),patch.object(report.costs,'marketplace_line',return_value=''),patch.object(report,'_ad_totals',return_value=ad):
-            msg=report.scoreboard();self.assertIn('Website revenue $100',msg);self.assertNotIn('Website revenue $200',msg);self.assertIn('Profit $63',msg);self.assertIn('TikTok-tagged website revenue $100.00',msg)
+            msg=report.scoreboard();self.assertIn('Website sales $100',msg);self.assertNotIn('Website sales $200',msg);self.assertIn('Profit $63',msg);self.assertIn('TikTok sales $100',msg)
             ad['total']=0;ad['meta']=0;ad['tiktok']=0
-            msg=report.scoreboard();self.assertIn('blended ROAS unavailable',msg);self.assertNotIn('0.00x',msg)
+            msg=report.scoreboard();self.assertIn('ROAS unavailable',msg);self.assertNotIn('0.00x',msg)
             ad['total']=None;ad['tiktok']=None
-            msg=report.scoreboard();self.assertIn('Profit / ROI unavailable',msg);self.assertIn('blended ROAS unavailable',msg);self.assertIn('TikTok unavailable',msg)
+            msg=report.scoreboard();self.assertIn('Profit / ROI / ROAS unavailable',msg);self.assertIn('ROAS unavailable',msg);self.assertIn('TikTok unavailable',msg)
 
     def test_weekly_recap_complete_and_missing(self):
         from copy import deepcopy
         totals={'revenue':100,'costs':25,'orders':1,'books':{},'unexpanded':{},'prods':{}}
         ad={'total':12.02,'meta':10,'tiktok':2.02,'note':'snapshot'}
         with patch.object(report.shopify,'orders',return_value=[]),patch.object(report.costs,'split_marketplace',return_value=([],[])),patch.object(report.costs,'split_wholesale',return_value=([],0)),patch.object(report,'_mp_cohort',return_value=[]),patch.object(report.costs,'load_cogs',return_value={}),patch.object(report,'_week_totals',side_effect=lambda *a:deepcopy(totals)),patch.object(report.klaviyo,'new_profiles',return_value=None),patch.object(report.costs,'marketplace_line',return_value=''),patch.object(report,'_ad_totals',side_effect=lambda *a:deepcopy(ad)):
-            msg=report.weekly_recap();self.assertIn('Profit $63',msg);self.assertIn('Ads $12.02',msg);self.assertIn('Prior week: Meta $10.00',msg)
+            msg=report.weekly_recap();self.assertIn('Profit $63',msg);self.assertIn('Ads $12.02',msg);self.assertIn('Meta $10.00 / TikTok $2.02',msg)
             ad['total']=0;ad['meta']=0;ad['tiktok']=0
-            msg=report.weekly_recap();self.assertIn('Blended ROAS unavailable',msg);self.assertNotIn('0.00x',msg)
+            msg=report.weekly_recap();self.assertIn('ROAS unavailable',msg);self.assertNotIn('0.00x',msg)
             ad['total']=None;ad['tiktok']=None
             msg=report.weekly_recap();self.assertIn('comparison unavailable',msg);self.assertNotIn('Profit $',msg)
     @patch.object(report.meta,'_get')
@@ -212,5 +212,12 @@ class ReportingTests(unittest.TestCase):
             with self.assertRaises(Exception):report.meta.spend('2026-11-13','2026-11-13',strict=True)
         get.return_value={'data':[{'spend':'0'}]}
         self.assertEqual(report.meta.spend('2026-11-13','2026-11-13',strict=True),0)
+
+    def test_compact_marketplace_preserves_missing_and_verified_values(self):
+        with patch.object(report.costs,'marketplace_line',return_value='🛒 Amazon: 3 order(s) placed this period - sales unavailable pending amount validation'):
+            self.assertEqual(report._compact_marketplace([]),'🛒 Amazon: 3 orders · sales unavailable')
+        with patch.object(report.costs,'marketplace_line',return_value='🛒 Amazon revenue $123'):
+            self.assertEqual(report._compact_marketplace([]),'🛒 Amazon revenue $123')
+        with patch.object(report.costs,'marketplace_line',return_value=None):self.assertEqual(report._compact_marketplace([]),'')
 
 if __name__=='__main__':unittest.main()

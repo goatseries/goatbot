@@ -101,7 +101,7 @@ def _subs_line(period, start, end, now):
         if period in ("t", "y"):
             prev = klaviyo.new_profiles((start - day).astimezone(utc), start.astimezone(utc))
             if prev is not None:
-                return f"\n📧 New subscribers {cur} (prev day {prev})"
+                return f"\n📧 New subscribers {cur} (prev {prev})"
         return f"\n📧 New subscribers {cur}"
     except Exception as e:
         print("subs line error: " + type(e).__name__); return ""
@@ -160,7 +160,16 @@ def _tagged_tiktok(orders, cogs):
 
 def _spend_line(ad):
     fmt = lambda v: f"${v:,.2f}" if v is not None else "unavailable"
-    return f"Meta {fmt(ad['meta'])} + TikTok {fmt(ad['tiktok'])} = Ads {fmt(ad['total'])}"
+    return f"Ads {fmt(ad['total'])} · Meta {fmt(ad['meta'])} / TikTok {fmt(ad['tiktok'])}"
+
+def _compact_marketplace(orders):
+    """Presentation only; preserve the existing validated marketplace values."""
+    line = costs.marketplace_line(orders)
+    if not line:
+        return ""
+    if "sales unavailable" in line:
+        return line.split(" order(s)", 1)[0] + " orders · sales unavailable"
+    return line
 
 def scoreboard(period="t"):
     start, end, label, now = _range(period)
@@ -192,20 +201,16 @@ def scoreboard(period="t"):
     profit = t["revenue"] - ads - costs_total if ads is not None else None
     roi = profit / (ads + costs_total) * 100 if ads is not None and (ads + costs_total) else 0
     roas = t["revenue"] / ads if ads else None
-    profit_line = f"Profit ${profit:,.0f} ({roi:.1f}% ROI)" if profit is not None else "Profit / ROI unavailable: ad spend incomplete"
-    roas_text = f" ({roas:.2f}x blended ROAS)" if roas is not None else " (blended ROAS unavailable)"
+    profit_line = f"Profit ${profit:,.0f} · ROI {roi:.1f}%" if profit is not None else "Profit / ROI / ROAS unavailable: ad spend missing"
+    roas_text = f" · ROAS {roas:.2f}x" if roas is not None else (" · ROAS unavailable" if ads is not None else "")
     subs = _subs_line(period, start, end, now)
-    ws_note = f"\nℹ️ {n_ws} wholesale order(s) excluded" if n_ws else ""
-    mp_note = f"\nℹ️ {len(mp)} Amazon order(s) not counted in retail" if mp else ""
-    if undated: mp_note += f" - {undated} Amazon order(s) fetched have an unknown sale date, Amazon figures incomplete"
-    _ml = costs.marketplace_line(mp, "this period"); mp_line = ("\n" + _ml) if _ml else ""
-    return (f"📊 {label} Scoreboard\nAs of {now.strftime('%b %-d, %-I:%M %p')} ET\n\n"
-        f"💰 {profit_line}\n💵 Website revenue ${t['revenue']:,.0f}{roas_text}\n"
-        f"💸 {_spend_line(ad)}\nCosts ${costs_total:,.0f}\n"
-        f"TikTok-tagged website revenue ${tt_revenue:,.2f} ({tt_orders} matched orders)\n"
-        f"Last-visit utm_source=tiktok subset only, not full ad attribution; already included in website revenue.\n"
-        f"💳 Orders {len(os_)}{subs}{ws_note}{mp_note}{mp_line}\n"
-        f"ℹ️ {ad['note']}\n🔧 {VERSION} · costs.json {costs.config_tag()}")
+    mp_line = _compact_marketplace(mp)
+    warning = "\n⚠️ Amazon dates incomplete" if undated else ""
+    return (f"📊 {label} · {now.strftime('%-I:%M %p')} ET\n"
+        f"💰 {profit_line}\n💵 Website sales ${t['revenue']:,.0f}{roas_text}\n"
+        f"💸 {_spend_line(ad)}\n🧾 Costs ${costs_total:,.0f} · 💳 Orders {len(os_)}\n"
+        f"🎵 TikTok sales ${tt_revenue:,.0f} (included)"
+        f"{subs}" + ("\n" + mp_line if mp_line else "") + warning)
 def creative_report(days=7):
     tz = ZoneInfo(c.TZ); end = datetime.now(tz); start = end - timedelta(days=days - 1)
     os_ = shopify.orders((start.replace(hour=0, minute=0, second=0).astimezone(ZoneInfo("UTC"))).strftime("%Y-%m-%dT%H:%M:%SZ"))
@@ -329,21 +334,16 @@ def weekly_recap():
     complete = a['ads'] is not None and b['ads'] is not None
     roas_fmt = lambda value: f"{value:.2f}x" if value is not None else "unavailable"
     financial = [
-        f"💰 Profit ${a['profit']:,.0f} ({a['roi']:.1f}% ROI) · {_chg(a['profit'], b['profit'], plain=True)} (was ${b['profit']:,.0f})",
-        f"💸 Ads ${a['ads']:,.2f} · {_chg(a['ads'], b['ads'])}",
-        f"🎯 Blended ROAS {roas_fmt(a['roas'])} · was {roas_fmt(b['roas'])}"] if complete else ["Profit / ROI / ROAS comparison unavailable: ad spend incomplete"]
+        f"💰 Profit ${a['profit']:,.0f} · ROI {a['roi']:.1f}% · {_chg(a['profit'], b['profit'], plain=True)}",
+        f"🎯 ROAS {roas_fmt(a['roas'])} · prev {roas_fmt(b['roas'])}"] if complete else ["💰 Profit / ROI / ROAS comparison unavailable: ad spend missing"]
     tt_revenue, tt_orders = _tagged_tiktok([o for o in allo if w1 <= created(o) < mon], cogs)
-    L = [f"📅 Weekly recap {rng(w1, mon - timedelta(days=1))}", f"vs {rng(w0, w1 - timedelta(days=1))}", ""] + financial + [
-         f"💵 Website revenue ${a['revenue']:,.0f} · {_chg(a['revenue'], b['revenue'])}",
-         _spend_line(a['ad']),
-         f"TikTok-tagged website revenue ${tt_revenue:,.2f} ({tt_orders} matched orders)",
-         "Last-visit utm_source=tiktok subset only, not full ad attribution; already included in website revenue.",
-         "ℹ️ " + a['ad']['note'],
-         "Prior week: " + _spend_line(b['ad']),
-         "ℹ️ Prior week: " + b['ad']['note'],
+    L = [f"📅 {rng(w1, mon - timedelta(days=1))} · vs {rng(w0, w1 - timedelta(days=1))}"] + financial + [
+         f"💵 Website sales ${a['revenue']:,.0f} · {_chg(a['revenue'], b['revenue'])}",
+         "💸 " + _spend_line(a['ad']),
          f"🧾 Costs ${a['costs']:,.0f} · {_chg(a['costs'], b['costs'])}",
-         f"💳 Orders {a['orders']} · {_chg(a['orders'], b['orders'], money=False)}"]
-    _ml = costs.marketplace_line(mp_wk, "last week")
+         f"💳 Orders {a['orders']} · {_chg(a['orders'], b['orders'], money=False)}",
+         f"🎵 TikTok sales ${tt_revenue:,.0f} (included)"]
+    _ml = _compact_marketplace(mp_wk)
     if _ml: L.append(_ml)
     if subs[0] is not None and subs[1] is not None: L.append(f"📧 New subscribers {subs[0]} · {_chg(subs[0], subs[1], money=False)}")
     elif subs[0] is not None: L.append(f"📧 New subscribers {subs[0]}")
@@ -351,13 +351,12 @@ def weekly_recap():
     if view not in ("sold", "books"): view = "books"
     rows = _rank(a, view, 5)
     if rows:
-        L += ["", "🏆 Top books sold (bundles expanded into books)" if view == "books" else "🏆 Best sellers (as sold; bundles are their own products)"]
+        L += ["", "🏆 Top books" if view == "books" else "🏆 Best sellers"]
         for i, (nm, u, rev, extra) in enumerate(rows, 1):
             prev = (sum(b["books"].get(nm, [0, 0])) if view == "books" else b["prods"].get(nm, [0, 0.0])[0])
-            L.append(f"{i}. {nm[:55]} - {u} units" + (f" · ${rev:,.0f}" if rev is not None else "") + (f" ({extra})" if extra else "") + f" (prev {prev})")
+            L.append(f"{i}. {nm[:55]} · {u} units (prev {prev})")
         if view == "books" and a["unexpanded"]:
-            L.append("Not expanded (contents unknown): " + ", ".join(f"{k} x{v}" for k, v in sorted(a["unexpanded"].items(), key=lambda kv: -kv[1])[:4]))
-        L.append("Use /top for both views and the order list.")
+            L.append("⚠️ Some bundle contents unknown; top books incomplete")
     return "\n".join(L)[:3900]
 
 def top_report():
