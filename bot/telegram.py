@@ -77,5 +77,6 @@ def commands(offset):
         if not parts: continue
         w = parts[0].split("@")[0].lower()
         if w in ("/t", "/y", "/w", "/m", "/costs", "/unmapped", "/breakdown", "/week", "/top"): out.append((chat_id, w[1:]))
+        elif w == "/tiktokconnect" and (m.get("chat") or {}).get("type") == "private" and str(chat_id) == str(_chat_id()) and str((m.get("from") or {}).get("id")) == str(chat_id): out.append((chat_id, "tiktokconnect"))
         elif w == "/order" and len(parts) > 1 and re.fullmatch(r"#?\d{1,10}", parts[1].strip()): out.append((chat_id, "order " + parts[1].strip()))
     return offset, out

@@ -1,7 +1,7 @@
 import time, json, os, re
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
-from . import config as c, shopify, telegram, report, costs
+from . import config as c, shopify, telegram, report, costs, tiktok_connect
 STATE = os.environ.get("STATE_PATH", "state.json")  # use a Railway volume for persistence
 def redact(msg):
     for k in ("TELEGRAM_BOT_TOKEN", "SHOPIFY_ADMIN_TOKEN", "SHOPIFY_CLIENT_SECRET", "SHOPIFY_CLIENT_ID", "META_ACCESS_TOKEN", "KLAVIYO_API_KEY"):
@@ -63,6 +63,7 @@ def marketplace_sale_decision(o, s, max_age_h):
         return "skip"                                    # fresh but unpaid: re-evaluate next poll
     return "seed"                                        # REFUNDED / PARTIALLY_REFUNDED / VOIDED / EXPIRED / unknown: never a new-sale alert
 def main():
+    tiktok_connect.start()
     s = load()
     fresh = not s["last_poll"]
     check_state_path()
@@ -120,7 +121,15 @@ def main():
                     print("weekly recap error:", redact(type(e).__name__ + ": " + str(e))); s["weekly_retry_after"] = time.time() + 600
             s["tg_offset"], reqs = telegram.commands(s.get("tg_offset", 0))
             for chat_id, p_ in reqs:
-                if p_ == "costs":
+                if p_ == "tiktokconnect":
+                    if str(chat_id) != str(telegram._chat_id()) or not isinstance(chat_id, int) or chat_id <= 0:
+                        continue  # Never publish a connection capability in a group.
+                    try:
+                        link = tiktok_connect.new_link()
+                        telegram.send("Connect TikTok to goatbot: " + link + "\nThis private link expires in 15 minutes. TikTok will show broad permissions. Reporting remains disabled until account verification.", chat_id=chat_id)
+                    except Exception:
+                        telegram.send("TikTok connection is not configured yet. Existing reporting is unchanged.", chat_id=chat_id)
+                elif p_ == "costs":
                     csv_text, n, n_no, n_un = report.costs_template()
                     telegram.send_document("cost-mapping.csv", csv_text, f"{n} products/variants from the last {c.COSTS_DAYS} days; {n_un} are not mapped in costs.json, {n_no} have no Shopify cost per item set. Add the unmapped ones to costs.json.", chat_id=chat_id)
                 elif p_ == "breakdown": telegram.send(report.breakdown(), chat_id=chat_id)
