@@ -189,7 +189,7 @@ class ReportingTests(unittest.TestCase):
         costs={'revenue':100,'fees':2,'cogs':20,'shipping':3,'returns':0,'units_cost':18,'packaging':2,'unmapped':[],'assumed_books':[],'tags':[],'lines':1,'missing_cogs':[]}
         ad={'total':12.02,'meta':10,'tiktok':2.02,'note':'TikTok fetched 1:38 PM; may lag'}
         with patch.object(report,'_range',return_value=(start,None,'Today',now)),patch.object(report.shopify,'orders',return_value=[order]),patch.object(report.costs,'split_marketplace',return_value=([order],[])),patch.object(report.costs,'split_wholesale',return_value=([order],0)),patch.object(report,'_mp_cohort',return_value=[]),patch.object(report.costs,'load_cogs',return_value={}),patch.object(report.costs,'order_costs',return_value=costs),patch.object(report,'_subs_line',return_value=''),patch.object(report.costs,'marketplace_line',return_value=''),patch.object(report,'_ad_totals',return_value=ad):
-            msg=report.scoreboard();self.assertIn('Website sales $100',msg);self.assertNotIn('Website sales $200',msg);self.assertIn('Profit $63',msg);self.assertIn('TikTok-tagged sales $100',msg)
+            msg=report.scoreboard();self.assertIn('Website sales $100',msg);self.assertNotIn('Website sales $200',msg);self.assertIn('Profit $63',msg);self.assertIn('TikTok sales $100',msg)
             ad['total']=0;ad['meta']=0;ad['tiktok']=0
             msg=report.scoreboard();self.assertIn('ROAS unavailable',msg);self.assertNotIn('0.00x',msg)
             ad['total']=None;ad['tiktok']=None
