@@ -20,13 +20,18 @@ def sale_message(o, cogs):
     if u.get("campaign"): lines.append(f"📱 {u['campaign']}")
     return "\n".join(lines)
 def amazon_sale_message(o):
-    """Alert for a fresh Amazon (marketplace) sale. Shows only the validated order amount
-    (ex tax, after refunds, before Amazon fees) - Amazon fees/profit are unknown and never
-    estimated. Timestamp is the original marketplace sale time (processedAt)."""
+    """Amazon alert: validated amount first, otherwise explicit website-price estimate.
+    Amazon fees/profit remain unknown. Original sale time is processedAt."""
     r = costs.marketplace_revenue([o])                 # same validated math as the scoreboard line
     amt = r["revenue"] if r["valued"] == 1 else None   # None when any money field is missing/inconsistent
     price = f"${amt:.2f}" if amt is not None else "amount unavailable pending validation"
-    lines = [f"\U0001f6d2 AMAZON SALE - {price} (excl. tax, before Amazon fees)", "",
+    note = "excl. tax, before Amazon fees"
+    if amt is None:
+        estimate = marketplace_estimate([o])
+        if estimate["amount"] is not None and estimate["estimated"]:
+            price = f"estimated ${estimate['amount']:.2f}"
+            note = "website prices; before Amazon fees"
+    lines = [f"\U0001f6d2 AMAZON SALE - {price} ({note})", "",
         f"\U0001f9fe {o.get('name', '?')} · Amazon · {o.get('displayFinancialStatus', '?')}",
         f"\U0001f552 sold {_when(o.get('processedAt'))}", "",
         "\U0001f4e6 " + ", ".join(f"{l['title']} x{l['quantity']}" for l in o["lineItems"]["nodes"])]
@@ -165,6 +170,10 @@ def _spend_line(ad):
 def _compact_marketplace(orders):
     """Presentation only; preserve the existing validated marketplace values."""
     line = costs.marketplace_line(orders)
+    if line and "sales unavailable" in line:
+        estimate = marketplace_estimate(orders)
+        if estimate["amount"] is not None and estimate["estimated"]:
+            return f"🛒 Amazon sales estimate ${estimate['amount']:,.2f} (website prices; before Amazon fees)"
     if not line:
         return ""
     if "sales unavailable" in line:
@@ -416,3 +425,65 @@ def top_report():
     txt = "\n\n".join(det)
     while txt: out.append(txt[:3800]); txt = txt[3800:]
     return out
+
+# Explicit, observed Amazon SKU to retail Shopify variant mapping. Never title-guess.
+AMAZON_RETAIL_VARIANTS = {
+    "XT-871I-98I8": "gid://shopify/ProductVariant/44739420127418",  # Michael Jordan
+    "6K-TCPZ-X0KO": "gid://shopify/ProductVariant/44739421175994",  # Tom Brady
+    "YU-ZVHY-KJSJ": "gid://shopify/ProductVariant/44739421208762",  # Lionel Messi
+}
+_price_cache = {"at": 0, "prices": {}}
+def amazon_website_prices():
+    """Current retail prices, cached five minutes. Failure never uses stale prices."""
+    if __import__("time").time() - _price_cache["at"] < 300:
+        return dict(_price_cache["prices"])
+    query = "query($ids:[ID!]!){nodes(ids:$ids){... on ProductVariant{id sku price product{onlineStoreUrl}}}}"
+    try:
+        j = shopify._post({"query": query, "variables": {"ids": list(AMAZON_RETAIL_VARIANTS.values())}})
+        if j.get("errors"): return {}
+        by_id = {v["id"]: v for v in j["data"]["nodes"] if v and (v.get("product") or {}).get("onlineStoreUrl")}
+        prices = {sku: by_id[vid]["price"] for sku, vid in AMAZON_RETAIL_VARIANTS.items() if vid in by_id}
+    except Exception:
+        return {}
+    _price_cache.update(at=__import__("time").time(), prices=prices)
+    return dict(prices)
+
+def marketplace_estimate(mp_orders, prices=None):
+    """Bot-only fallback. Actual validated amounts win; estimate only paid, zero,
+    non-refunded imports with a complete, explicitly mapped product list.
+    Current website prices are not historical Amazon charges or net proceeds.
+    """
+    from decimal import Decimal, InvalidOperation
+    total = Decimal("0"); estimated = unknown = 0
+    allowed = {x.upper() for x in costs.load_config().get("order_statuses", ["PAID", "PARTIALLY_REFUNDED"])}
+    for o in mp_orders:
+        if o.get("cancelledAt") or o.get("test"): continue
+        if o.get("displayFinancialStatus") and o["displayFinancialStatus"].upper() not in allowed: continue
+        actual = costs.marketplace_revenue([o])
+        if actual["valued"] == 1:
+            total += Decimal(str(actual["revenue"])); continue
+        try:
+            # Ian approved estimates only for sales from Nov 16, 2026 ET onward.
+            # Fail closed on absent/naive sale times. Import time is not sale time.
+            from datetime import datetime
+            from zoneinfo import ZoneInfo
+            sold = datetime.fromisoformat(o["processedAt"].replace("Z", "+00:00"))
+            if sold.tzinfo is None or sold < datetime(2026, 11, 16, tzinfo=ZoneInfo("America/New_York")): raise ValueError()
+            if o.get("displayFinancialStatus") != "PAID": raise ValueError()
+            if Decimal(o["totalPriceSet"]["shopMoney"]["amount"]) != 0: raise ValueError()
+            if Decimal(o["totalRefundedSet"]["shopMoney"]["amount"]) != 0: raise ValueError()
+            lines = o["lineItems"]["nodes"]
+            if not lines or len(lines) >= 25: raise ValueError()  # query capped at 25
+            if prices is None: prices = amazon_website_prices()
+            amount = Decimal("0")
+            for li in lines:
+                sku = (li.get("sku") or "").strip()
+                quantity = li["quantity"]
+                if not isinstance(quantity, int) or isinstance(quantity, bool) or quantity <= 0: raise ValueError()
+                price = Decimal(str(prices[sku]))
+                if not price.is_finite() or price <= 0: raise ValueError()
+                amount += price * quantity
+            total += amount; estimated += 1
+        except (KeyError, TypeError, ValueError, AttributeError, InvalidOperation):
+            unknown += 1
+    return {"amount": float(total) if not unknown else None, "estimated": estimated, "unknown": unknown}
