@@ -287,11 +287,55 @@ def marketplace_revenue(mp_orders):
         rev += (gross - tax) - max(0.0, refunded - tax_refunded); valued += 1
     return {"orders": n, "valued": valued, "unvalued": n - valued,
             "revenue": rev if valued == n and n else (0.0 if n == 0 else None)}
+def marketplace_estimate(mp_orders, prices=None):
+    """Bot-only fallback. Actual validated amounts win; estimate only paid, zero,
+    non-refunded imports with a complete, explicitly mapped product list.
+    Current website prices are not historical Amazon charges or net proceeds.
+    """
+    from decimal import Decimal, InvalidOperation
+    from . import shopify
+    total = Decimal("0"); estimated = unknown = 0
+    allowed = {x.upper() for x in load_config().get("order_statuses", ["PAID", "PARTIALLY_REFUNDED"])}
+    for o in mp_orders:
+        if o.get("cancelledAt") or o.get("test"): continue
+        if o.get("displayFinancialStatus") and o["displayFinancialStatus"].upper() not in allowed: continue
+        actual = marketplace_revenue([o])
+        if actual["valued"] == 1:
+            total += Decimal(str(actual["revenue"])); continue
+        try:
+            # Ian approved estimates only for sales from Nov 16, 2026 ET onward.
+            # Fail closed on absent/naive sale times. Import time is not sale time.
+            from datetime import datetime
+            from zoneinfo import ZoneInfo
+            sold = datetime.fromisoformat(o["processedAt"].replace("Z", "+00:00"))
+            if sold.tzinfo is None or sold < datetime(2026, 11, 16, tzinfo=ZoneInfo("America/New_York")): raise ValueError()
+            if o.get("displayFinancialStatus") != "PAID": raise ValueError()
+            if Decimal(o["totalPriceSet"]["shopMoney"]["amount"]) != 0: raise ValueError()
+            if Decimal(o["totalRefundedSet"]["shopMoney"]["amount"]) != 0: raise ValueError()
+            lines = o["lineItems"]["nodes"]
+            if not lines or len(lines) >= 25: raise ValueError()  # query capped at 25
+            if prices is None: prices = shopify.amazon_website_prices()
+            amount = Decimal("0")
+            for li in lines:
+                sku = (li.get("sku") or "").strip()
+                quantity = li["quantity"]
+                if not isinstance(quantity, int) or isinstance(quantity, bool) or quantity <= 0: raise ValueError()
+                price = Decimal(str(prices[sku]))
+                if not price.is_finite() or price <= 0: raise ValueError()
+                amount += price * quantity
+            total += amount; estimated += 1
+        except (KeyError, TypeError, ValueError, AttributeError, InvalidOperation):
+            unknown += 1
+    return {"amount": float(total) if not unknown else None, "estimated": estimated, "unknown": unknown}
+
 def marketplace_line(mp_orders, period_label="this period"):
     """Display line for the excluded marketplace set, or None when there are none."""
     r = marketplace_revenue(mp_orders)
     if not r["orders"]: return None
     if r["revenue"] is None or r["unvalued"]:
+        estimate = marketplace_estimate(mp_orders)
+        if estimate["amount"] is not None and estimate["estimated"]:
+            return f"🛒 Amazon sales estimate ${estimate['amount']:,.2f} (website prices; before Amazon fees)"
         return (f"🛒 Amazon: {r['orders']} order(s) placed {period_label} - "
                 f"sales unavailable pending amount validation")
     return f"🛒 Amazon revenue ${r['revenue']:,.0f}"
