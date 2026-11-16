@@ -73,3 +73,25 @@ def find_order(name):
         if "errors" not in j: return j["data"]["orders"]["nodes"]
         print("shopify: /order lookup query failed: " + str(j["errors"])[:200])
     return []
+
+# Explicit, observed Amazon SKU to retail Shopify variant mapping. Never title-guess.
+AMAZON_RETAIL_VARIANTS = {
+    "XT-871I-98I8": "gid://shopify/ProductVariant/44739420127418",  # Michael Jordan
+    "6K-TCPZ-X0KO": "gid://shopify/ProductVariant/44739421175994",  # Tom Brady
+    "YU-ZVHY-KJSJ": "gid://shopify/ProductVariant/44739421208762",  # Lionel Messi
+}
+_price_cache = {"at": 0, "prices": {}}
+def amazon_website_prices():
+    """Current retail prices, cached five minutes. Failure never uses stale prices."""
+    if time.time() - _price_cache["at"] < 300:
+        return dict(_price_cache["prices"])
+    query = "query($ids:[ID!]!){nodes(ids:$ids){... on ProductVariant{id sku price product{onlineStoreUrl}}}}"
+    try:
+        j = _post({"query": query, "variables": {"ids": list(AMAZON_RETAIL_VARIANTS.values())}})
+        if j.get("errors"): return {}
+        by_id = {v["id"]: v for v in j["data"]["nodes"] if v and (v.get("product") or {}).get("onlineStoreUrl")}
+        prices = {sku: by_id[vid]["price"] for sku, vid in AMAZON_RETAIL_VARIANTS.items() if vid in by_id}
+    except Exception:
+        return {}
+    _price_cache.update(at=time.time(), prices=prices)
+    return dict(prices)
