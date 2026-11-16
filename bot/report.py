@@ -20,13 +20,18 @@ def sale_message(o, cogs):
     if u.get("campaign"): lines.append(f"📱 {u['campaign']}")
     return "\n".join(lines)
 def amazon_sale_message(o):
-    """Alert for a fresh Amazon (marketplace) sale. Shows only the validated order amount
-    (ex tax, after refunds, before Amazon fees) - Amazon fees/profit are unknown and never
-    estimated. Timestamp is the original marketplace sale time (processedAt)."""
+    """Amazon alert: validated amount first, otherwise explicit website-price estimate.
+    Amazon fees/profit remain unknown. Original sale time is processedAt."""
     r = costs.marketplace_revenue([o])                 # same validated math as the scoreboard line
     amt = r["revenue"] if r["valued"] == 1 else None   # None when any money field is missing/inconsistent
     price = f"${amt:.2f}" if amt is not None else "amount unavailable pending validation"
-    lines = [f"\U0001f6d2 AMAZON SALE - {price} (excl. tax, before Amazon fees)", "",
+    note = "excl. tax, before Amazon fees"
+    if amt is None:
+        estimate = costs.marketplace_estimate([o])
+        if estimate["amount"] is not None and estimate["estimated"]:
+            price = f"estimated ${estimate['amount']:.2f}"
+            note = "website prices; before Amazon fees"
+    lines = [f"\U0001f6d2 AMAZON SALE - {price} ({note})", "",
         f"\U0001f9fe {o.get('name', '?')} · Amazon · {o.get('displayFinancialStatus', '?')}",
         f"\U0001f552 sold {_when(o.get('processedAt'))}", "",
         "\U0001f4e6 " + ", ".join(f"{l['title']} x{l['quantity']}" for l in o["lineItems"]["nodes"])]
