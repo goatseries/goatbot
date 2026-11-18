@@ -12,7 +12,7 @@ def redact(msg):
 def load():
     try: s = json.load(open(STATE))
     except Exception: s = {}
-    s.setdefault("seen", []); s.setdefault("pending", []); s.setdefault("last_poll", None); s.setdefault("sent_slots", [])
+    s.setdefault("alerted", []); s.setdefault("recheck", {}); s.setdefault("seen", []); s.setdefault("pending", []); s.setdefault("last_poll", None); s.setdefault("sent_slots", [])
     return s
 def save(s):
     """Atomic write: temp file in the same directory, fsync, rename."""
@@ -33,7 +33,8 @@ def check_state_path():
         print(f"state path {STATE} is on a mounted volume")
 def new_sale_decision(o, s, keep_ids, max_age_h):
     """Returns 'alert', 'seed' (mark seen silently) or 'skip' (leave for later)."""
-    if o["id"] in s["seen"]: return "skip"
+    if o["id"] in s.get("alerted", []): return "skip"
+    if o["id"] in s["seen"] and o["id"] not in s.get("recheck", {}): return "skip"
     if o["cancelledAt"]: return "seed" if o["id"] not in s["pending"] else "skip"
     age_h = (datetime.now(timezone.utc) - datetime.fromisoformat(o["createdAt"].replace("Z", "+00:00"))).total_seconds() / 3600
     st = o.get("displayFinancialStatus")
@@ -50,7 +51,8 @@ def marketplace_sale_decision(o, s, max_age_h):
     undated or cancelled; 'skip' leaves a fresh unpaid order for a later poll. Pending ids
     are never remembered, so an old imported unpaid order that later flips paid seeds instead
     of replaying as a new sale."""
-    if o["id"] in s["seen"]: return "skip"
+    if o["id"] in s.get("alerted", []): return "skip"
+    if o["id"] in s["seen"] and o["id"] not in s.get("recheck", {}): return "skip"
     if o["cancelledAt"]: return "seed"
     pa = o.get("processedAt")
     if not pa: return "seed"                             # original sale date unknown: never alert
@@ -62,6 +64,27 @@ def marketplace_sale_decision(o, s, max_age_h):
     if st in ("PENDING", "AUTHORIZED", "PARTIALLY_PAID", "UNPAID"):
         return "skip"                                    # fresh but unpaid: re-evaluate next poll
     return "seed"                                        # REFUNDED / PARTIALLY_REFUNDED / VOIDED / EXPIRED / unknown: never a new-sale alert
+def record_sale_decision(o, s, decision, max_age_h, marketplace=False):
+    """Keep legacy seen IDs safe, but revisit new silent seeds if payment changes."""
+    oid = o["id"]
+    first_seen = oid not in s["seen"]
+    if first_seen: s["seen"].append(oid)
+    if oid in s["pending"]: s["pending"].remove(oid)
+    if decision == "alert":
+        if oid not in s.setdefault("alerted", []): s["alerted"].append(oid)
+        s.setdefault("recheck", {}).pop(oid, None)
+    else:
+        stamp = o.get("processedAt" if marketplace else "createdAt")
+        try:
+            expires = datetime.fromisoformat(stamp.replace("Z", "+00:00")).timestamp() + max_age_h * 3600
+        except (AttributeError, TypeError, ValueError):
+            expires = 0
+        # Only newly seeded orders enter recheck. Never replay legacy seen orders.
+        if expires > time.time() and (first_seen or oid in s.setdefault("recheck", {})):
+            s["recheck"][oid] = expires
+    save(s)
+    return first_seen
+
 def main():
     tiktok_connect.start()
     s = load()
@@ -81,6 +104,7 @@ def main():
             keep_ids = {o["id"] for o in costs.split_wholesale(costs.split_marketplace(got)[0])[0]}  # marketplace first, then wholesale
             mp_ids = {o["id"] for o in costs.split_marketplace(got)[1]}
             max_age_h = float(os.environ.get("ALERT_MAX_AGE_HOURS", "6"))
+            s["recheck"] = {oid: expiry for oid, expiry in s["recheck"].items() if expiry > time.time()}
             for o in got:
                 if o["id"] in mp_ids:
                     d = marketplace_sale_decision(o, s, max_age_h)
@@ -88,20 +112,17 @@ def main():
                         telegram.send(report.amazon_sale_message(o))
                         print(f"alert (amazon): order {o.get('name')} id {o['id'].split('/')[-1]} status {o.get('displayFinancialStatus')} sold {o.get('processedAt')}")
                     if d in ("alert", "seed"):
-                        s["seen"].append(o["id"])
-                        if o["id"] in s["pending"]: s["pending"].remove(o["id"])
-                        if d == "seed": print(f"seeded (no alert): order {o.get('name')} status {o.get('displayFinancialStatus')} source {o.get('sourceName')} sold {o.get('processedAt')}")
-                        save(s)   # persist right after each alert/seed
+                        first_seen = record_sale_decision(o, s, d, max_age_h, marketplace=True)
+                        if d == "seed" and first_seen: print(f"seeded (no alert): order {o.get('name')} status {o.get('displayFinancialStatus')} source {o.get('sourceName')} sold {o.get('processedAt')}")
                     continue
                 d = new_sale_decision(o, s, keep_ids, max_age_h)
                 if d == "alert":
                     telegram.send(report.sale_message(o, cogs))
                     print(f"alert: order {o.get('name')} id {o['id'].split('/')[-1]} status {o.get('displayFinancialStatus')} source {o.get('sourceName')} created {o.get('createdAt')} updated {o.get('updatedAt')}")
                 if d in ("alert", "seed"):
-                    s["seen"].append(o["id"])
-                    if o["id"] in s["pending"]: s["pending"].remove(o["id"])
-                    if d == "seed": print(f"seeded (no alert): order {o.get('name')} status {o.get('displayFinancialStatus')} created {o.get('createdAt')} updated {o.get('updatedAt')}")
-                    save(s)   # persist right after each alert/seed
+                    first_seen = record_sale_decision(o, s, d, max_age_h)
+                    if d == "seed" and first_seen: print(f"seeded (no alert): order {o.get('name')} status {o.get('displayFinancialStatus')} created {o.get('createdAt')} updated {o.get('updatedAt')}")
+            s["alerted"] = s["alerted"][-5000:]
             s["seen"] = s["seen"][-5000:]; s["pending"] = s["pending"][-500:]
             s["last_poll"] = datetime.now(timezone.utc).isoformat()
             now = datetime.now(ZoneInfo(c.TZ)); today = now.strftime("%Y-%m-%d")
