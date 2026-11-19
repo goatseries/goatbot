@@ -200,9 +200,24 @@ def _is_ws_order(o, w):
     if tags & {norm(t) for t in w.get("order_tags", [])}: return True
     src = (norm(o.get("sourceName")) + " " + norm((o.get("app") or {}).get("name"))).strip()
     return bool(src) and any(norm(x) and norm(x) in src for x in w.get("source_names", []))
+def is_pos_order(o):
+    """Shopify POS (in-person point of sale) order: the Admin API sourceName is exactly
+    'pos'. Exact match on the normalized value, never a substring, so an app or source
+    name that merely contains 'pos' stays counted."""
+    return norm(o.get("sourceName")) == "pos"
+def split_pos(orders):
+    """(online_orders, pos_orders). In-person POS sales are not online-store sales:
+    excluded from website revenue, costs, profit, order counts, the sale feed, /costs,
+    /unmapped and /top, like wholesale. Unlike marketplace orders they are not reported
+    separately anywhere."""
+    keep, pos = [], []
+    for o in orders:
+        (pos if is_pos_order(o) else keep).append(o)
+    return keep, pos
 def split_wholesale(orders):
-    """(retail_orders, n_excluded). Rule in costs.json wholesale.mixed_order_rule."""
-    orders = filter_status(orders)
+    """(retail_orders, n_excluded). Rule in costs.json wholesale.mixed_order_rule.
+    POS orders are already gone from the result; n_excluded counts wholesale only."""
+    orders = split_pos(filter_status(orders))[0]   # POS removed first; not counted in n_excluded below
     w = load_config().get("wholesale")
     if not w or w.get("mixed_order_rule") == "include_all": return orders, 0
     rule = w.get("mixed_order_rule", "exclude_order"); keep, n = [], 0
