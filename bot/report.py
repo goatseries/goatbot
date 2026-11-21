@@ -432,6 +432,7 @@ AMAZON_RETAIL_VARIANTS = {
     "XT-871I-98I8": "gid://shopify/ProductVariant/44739420127418",  # Michael Jordan
     "6K-TCPZ-X0KO": "gid://shopify/ProductVariant/44739421175994",  # Tom Brady
     "YU-ZVHY-KJSJ": "gid://shopify/ProductVariant/44739421208762",  # Lionel Messi
+    "00-EZYJ-1EA5": "gid://shopify/ProductVariant/45216626966714",  # Bath Time sports bath book
 }
 _price_cache = {"at": 0, "prices": {}}
 def amazon_website_prices():
