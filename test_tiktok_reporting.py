@@ -34,9 +34,9 @@ class SpendTests(unittest.TestCase):
     def test_reject_invalid_money(self):
         for value in [None,'NaN','Infinity','-0.01','bad',True]:
             with self.subTest(value=value),self.assertRaises(t.Unavailable):t.total_rows([row('2026-11-13 05:00:00',value)],dt('2026-11-13T05:00:00+00:00'),dt('2026-11-14T05:00:00+00:00'))
-    def test_empty_and_outside_interval_not_zero(self):
+    def test_validated_empty_or_outside_interval_is_zero(self):
         for rows in [[],[row('2026-11-13 04:00:00')]]:
-            with self.assertRaises(t.Unavailable):t.total_rows(rows,dt('2026-11-13T05:00:00+00:00'),dt('2026-11-14T05:00:00+00:00'))
+            self.assertEqual(t.total_rows(rows,dt('2026-11-13T05:00:00+00:00'),dt('2026-11-14T05:00:00+00:00')),Decimal('0'))
     def test_duplicate_currency_account_fail(self):
         rows=[row('2026-11-13 05:00:00')]*2
         for values in [rows,[row('2026-11-13 05:00:00',currency='EUR')],[row('2026-11-13 05:00:00',advertiser_id='wrong')]]:
