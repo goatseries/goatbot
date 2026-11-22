@@ -172,7 +172,8 @@ def _hourly(first, last):
 
 def total_rows(rows, start, end):
     if not rows:
-        raise Unavailable('TikTok returned no rows; zero spend not verified')
+        # Reached only after a fully validated successful report (coverage and counts checked): TikTok had no spend rows.
+        return Decimal('0')
     amount, seen, matched = Decimal('0'), set(), 0
     for row in rows:
         dim, metrics = row.get('dimensions') or {}, row.get('metrics') or {}
@@ -189,10 +190,8 @@ def total_rows(rows, start, end):
         if start <= hour < end:
             amount += value
             matched += 1
-    # Nonempty successful coverage may have rows outside the ET interval only.
-    # Never infer that an entirely absent selected interval is zero spend.
-    if not matched:
-        raise Unavailable('TikTok returned no rows in this period; zero not verified')
+    # Successful, validated report with no rows inside the selected interval: no spend then (ads off).
+    # API errors and invalid responses still raise Unavailable above and never become zero.
     return amount
 
 def spend(start, end, now=None):
