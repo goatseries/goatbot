@@ -9,6 +9,12 @@ def redact(msg):
         if v: msg = msg.replace(v, "[REDACTED]")
     msg = re.sub(r"shp(?:at|ca|ss)_[A-Za-z0-9]+", "[REDACTED]", msg)
     return re.sub(r"bot\d+:[A-Za-z0-9_-]+", "bot[REDACTED]", re.sub(r"access_token=[^&\s]+", "access_token=[REDACTED]", msg))
+def alert_send(text):
+    """Sale alerts go to the home chat, plus any chat ids in ALERT_EXTRA_CHAT_IDS (comma-separated)."""
+    telegram.send(text)
+    for cid in [x.strip() for x in (os.environ.get("ALERT_EXTRA_CHAT_IDS") or "").split(",") if x.strip()]:
+        try: telegram.send(text, chat_id=cid)
+        except Exception as e: print(f"extra alert recipient failed: {type(e).__name__}")
 def load():
     try: s = json.load(open(STATE))
     except Exception: s = {}
@@ -109,7 +115,7 @@ def main():
                 if o["id"] in mp_ids:
                     d = marketplace_sale_decision(o, s, max_age_h)
                     if d == "alert":
-                        telegram.send(report.amazon_sale_message(o))
+                        alert_send(report.amazon_sale_message(o))
                         print(f"alert (amazon): order {o.get('name')} id {o['id'].split('/')[-1]} status {o.get('displayFinancialStatus')} sold {o.get('processedAt')}")
                     if d in ("alert", "seed"):
                         first_seen = record_sale_decision(o, s, d, max_age_h, marketplace=True)
@@ -117,7 +123,7 @@ def main():
                     continue
                 d = new_sale_decision(o, s, keep_ids, max_age_h)
                 if d == "alert":
-                    telegram.send(report.sale_message(o, cogs))
+                    alert_send(report.sale_message(o, cogs))
                     print(f"alert: order {o.get('name')} id {o['id'].split('/')[-1]} status {o.get('displayFinancialStatus')} source {o.get('sourceName')} created {o.get('createdAt')} updated {o.get('updatedAt')}")
                 if d in ("alert", "seed"):
                     first_seen = record_sale_decision(o, s, d, max_age_h)
