@@ -305,13 +305,20 @@ def _rank(a, view, n):
         rows = [(k, sum(v), None, f"{v[0]} alone + {v[1]} in bundles") for k, v in a["books"].items()]
     return sorted(rows, key=lambda r: -r[1])[:n]
 def _book_units(orders):
-    """Total book units sold (books inside bundles included; bundles with unknown contents not expandable)."""
-    prods = {}; books = {}; unexp = {}
+    """Total book units sold. Mapped items count books_per_unit (bundles and gift sets expanded);
+    unmapped lines count 1 per unit when the title says book (e.g. Bath Time), coloring books excluded."""
+    cfg = costs.load_config(); total = 0
     for o in orders:
-        if o.get("cancelledAt") or not (o.get("lineItems") or {}).get("nodes"): continue
-        try: _tally(o, prods, books, unexp)
-        except Exception as e: print("books line skipped an order: " + type(e).__name__)
-    return sum(sum(v) for v in books.values())
+        if o.get("cancelledAt"): continue
+        for li in (o.get("lineItems") or {}).get("nodes") or []:
+            try:
+                q = int(li["quantity"]); it = costs.classify(li, cfg)
+                if it: n = costs.books_in(li, it)
+                else:
+                    t = (li.get("title") or "").lower(); n = 1 if "book" in t and "coloring" not in t else 0
+                total += n * q
+            except Exception as e: print("books line skipped a line: " + type(e).__name__)
+    return total
 def _books_line(web, mp, prev=None):
     w = _book_units(web); m = _book_units(mp); n = w + m
     line = f"\U0001f4da Books sold {n}"
