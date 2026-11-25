@@ -308,8 +308,9 @@ def _book_units(orders):
     """Total book units sold (books inside bundles included; bundles with unknown contents not expandable)."""
     prods = {}; books = {}; unexp = {}
     for o in orders:
-        if o.get("cancelledAt"): continue
-        _tally(o, prods, books, unexp)
+        if o.get("cancelledAt") or not (o.get("lineItems") or {}).get("nodes"): continue
+        try: _tally(o, prods, books, unexp)
+        except Exception as e: print("books line skipped an order: " + type(e).__name__)
     return sum(sum(v) for v in books.values())
 def _books_line(web, mp, prev=None):
     w = _book_units(web); m = _book_units(mp); n = w + m
