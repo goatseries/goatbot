@@ -302,14 +302,24 @@ def marketplace_revenue(mp_orders):
         rev += (gross - tax) - max(0.0, refunded - tax_refunded); valued += 1
     return {"orders": n, "valued": valued, "unvalued": n - valued,
             "revenue": rev if valued == n and n else (0.0 if n == 0 else None)}
-def marketplace_line(mp_orders, period_label="this period"):
+def marketplace_name(o):
+    """'Walmart' when the order carries a Walmart tag (seller id or 'Walmart US'), otherwise 'Amazon'."""
+    m = _mp_cfg() or {}
+    wt = {norm(t) for t in m.get("walmart_tags", [])}
+    return "Walmart" if wt and ({norm(t) for t in (o.get("tags") or [])} & wt) else "Amazon"
+def split_by_marketplace(mp_orders):
+    """{'Amazon': [...], 'Walmart': [...]} (empty lists kept out)."""
+    out = {}
+    for o in mp_orders: out.setdefault(marketplace_name(o), []).append(o)
+    return out
+def marketplace_line(mp_orders, period_label="this period", name="Amazon"):
     """Display line for the excluded marketplace set, or None when there are none."""
     r = marketplace_revenue(mp_orders)
     if not r["orders"]: return None
     if r["revenue"] is None or r["unvalued"]:
-        return (f"🛒 Amazon: {r['orders']} order(s) placed {period_label} - "
+        return (f"🛒 {name}: {r['orders']} order(s) placed {period_label} - "
                 f"sales unavailable pending amount validation")
-    return f"🛒 Amazon revenue ${r['revenue']:,.0f}"
+    return f"🛒 {name} revenue ${r['revenue']:,.0f}"
 def config_tag():
     """Short fingerprint of costs.json so readings can be traced to a config."""
     import hashlib
