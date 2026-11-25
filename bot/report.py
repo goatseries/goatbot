@@ -219,7 +219,8 @@ def scoreboard(period="t"):
     return (f"📊 {label} · {now.strftime('%-I:%M %p')} ET\n"
         f"💰 {profit_line}\n💵 Website sales ${t['revenue']:,.0f}{roas_text}\n"
         f"💸 {_spend_line(ad)}\n🧾 Costs ${costs_total:,.0f} · 💳 Orders {len(os_)}\n"
-        f"🎵 TikTok sales ${tt_revenue:,.0f} (included)"
+        f"🎵 TikTok sales ${tt_revenue:,.0f} (included)\n"
+        f"{_books_line(os_, mp)}"
         f"{subs}" + ("\n" + mp_line if mp_line else "") + warning)
 def creative_report(days=7):
     tz = ZoneInfo(c.TZ); end = datetime.now(tz); start = end - timedelta(days=days - 1)
@@ -303,6 +304,19 @@ def _rank(a, view, n):
     else:
         rows = [(k, sum(v), None, f"{v[0]} alone + {v[1]} in bundles") for k, v in a["books"].items()]
     return sorted(rows, key=lambda r: -r[1])[:n]
+def _book_units(orders):
+    """Total book units sold (books inside bundles included; bundles with unknown contents not expandable)."""
+    prods = {}; books = {}; unexp = {}
+    for o in orders:
+        if o.get("cancelledAt"): continue
+        _tally(o, prods, books, unexp)
+    return sum(sum(v) for v in books.values())
+def _books_line(web, mp, prev=None):
+    w = _book_units(web); m = _book_units(mp); n = w + m
+    line = f"\U0001f4da Books sold {n}"
+    if m: line += f" ({m} Amazon)"
+    if prev is not None: line += f" · {_chg(n, prev, money=False)}"
+    return line
 def _week_totals(orders, cogs):
     """Same math as scoreboard(): paid/partially refunded, tax excluded, real fees, label table, wholesale already removed."""
     t = dict(revenue=0.0, fees=0.0, cogs=0.0, shipping=0.0, returns=0.0); n = 0; prods = {}; books = {}; unexp = {}
@@ -331,6 +345,7 @@ def weekly_recap():
     allo = costs.split_marketplace(allo)[0]; allo, _ = costs.split_wholesale(allo); cogs = costs.load_cogs()
     def created(o): return datetime.fromisoformat(o["createdAt"].replace("Z", "+00:00")).astimezone(tz)
     mp_wk = _mp_cohort(w1, mon)          # by original marketplace sale date, not import date
+    mp_prev = _mp_cohort(w0, w1)
     a = _week_totals([o for o in allo if w1 <= created(o) < mon], cogs)
     b = _week_totals([o for o in allo if w0 <= created(o) < w1], cogs)
     for t_, s_, e_ in ((a, w1, mon - timedelta(days=1)), (b, w0, w1 - timedelta(days=1))):
@@ -352,6 +367,7 @@ def weekly_recap():
          "💸 " + _spend_line(a['ad']),
          f"🧾 Costs ${a['costs']:,.0f} · {_chg(a['costs'], b['costs'])}",
          f"💳 Orders {a['orders']} · {_chg(a['orders'], b['orders'], money=False)}",
+         _books_line([o for o in allo if w1 <= created(o) < mon], mp_wk, _book_units([o for o in allo if w0 <= created(o) < w1]) + _book_units(mp_prev)),
          f"🎵 TikTok sales ${tt_revenue:,.0f} (included)"]
     _ml = _compact_marketplace(mp_wk)
     if _ml: L.append(_ml)
@@ -489,3 +505,4 @@ def marketplace_estimate(mp_orders, prices=None):
         except (KeyError, TypeError, ValueError, AttributeError, InvalidOperation):
             unknown += 1
     return {"amount": float(total) if not unknown else None, "estimated": estimated, "unknown": unknown}
+
