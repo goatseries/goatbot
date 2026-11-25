@@ -25,14 +25,15 @@ def amazon_sale_message(o):
     r = costs.marketplace_revenue([o])                 # same validated math as the scoreboard line
     amt = r["revenue"] if r["valued"] == 1 else None   # None when any money field is missing/inconsistent
     price = f"${amt:.2f}" if amt is not None else "amount unavailable pending validation"
-    note = "excl. tax, before Amazon fees"
+    mk = costs.marketplace_name(o)
+    note = f"excl. tax, before {mk} fees"
     if amt is None:
         estimate = marketplace_estimate([o])
         if estimate["amount"] is not None and estimate["estimated"]:
             price = f"estimated ${estimate['amount']:.2f}"
-            note = "website prices; before Amazon fees"
-    lines = [f"\U0001f6d2 AMAZON SALE - {price} ({note})", "",
-        f"\U0001f9fe {o.get('name', '?')} · Amazon · {o.get('displayFinancialStatus', '?')}",
+            note = f"website prices; before {mk} fees"
+    lines = [f"\U0001f6d2 {mk.upper()} SALE - {price} ({note})", "",
+        f"\U0001f9fe {o.get('name', '?')} · {mk} · {o.get('displayFinancialStatus', '?')}",
         f"\U0001f552 sold {_when(o.get('processedAt'))}", "",
         "\U0001f4e6 " + ", ".join(f"{l['title']} x{l['quantity']}" for l in o["lineItems"]["nodes"])]
     return "\n".join(lines)
@@ -169,12 +170,19 @@ def _spend_line(ad):
     return f"Ads {fmt(ad['total'])} · Meta {fmt(ad['meta'])} / TikTok {fmt(ad['tiktok'])}"
 
 def _compact_marketplace(orders):
+    """One line per marketplace (Amazon first, then Walmart); empty marketplaces are skipped."""
+    groups = costs.split_by_marketplace(orders)
+    if not groups: return _compact_marketplace_one(orders)
+    lines = [_compact_marketplace_one(groups[n], n) for n in ("Amazon", "Walmart") if n in groups]
+    return "\n".join(l for l in lines if l)
+
+def _compact_marketplace_one(orders, name="Amazon"):
     """Presentation only; preserve the existing validated marketplace values."""
-    line = costs.marketplace_line(orders)
+    line = costs.marketplace_line(orders, name=name)
     if line and "sales unavailable" in line:
         estimate = marketplace_estimate(orders)
         if estimate["amount"] is not None and estimate["estimated"]:
-            return f"🛒 Amazon sales estimate ${estimate['amount']:,.2f} (website prices; before Amazon fees)"
+            return f"🛒 {name} sales estimate ${estimate['amount']:,.2f} (website prices; before {name} fees)"
     if not line:
         return ""
     if "sales unavailable" in line:
@@ -215,7 +223,7 @@ def scoreboard(period="t"):
     roas_text = f" · ROAS {roas:.2f}x" if roas is not None else (" · ROAS unavailable" if ads is not None else "")
     subs = _subs_line(period, start, end, now)
     mp_line = _compact_marketplace(mp)
-    warning = "\n⚠️ Amazon dates incomplete" if undated else ""
+    warning = "\n⚠️ Marketplace dates incomplete" if undated else ""
     return (f"📊 {label} · {now.strftime('%-I:%M %p')} ET\n"
         f"💰 {profit_line}\n💵 Website sales ${t['revenue']:,.0f}{roas_text}\n"
         f"💸 {_spend_line(ad)}\n🧾 Costs ${costs_total:,.0f} · 💳 Orders {len(os_)}\n"
@@ -320,9 +328,11 @@ def _book_units(orders):
             except Exception as e: print("books line skipped a line: " + type(e).__name__)
     return total
 def _books_line(web, mp, prev=None):
-    w = _book_units(web); m = _book_units(mp); n = w + m
+    g = costs.split_by_marketplace(mp)
+    w = _book_units(web); parts = [(k, _book_units(g[k])) for k in ("Amazon", "Walmart") if k in g]; n = w + sum(v for _, v in parts)
     line = f"\U0001f4da Books sold {n}"
-    if m: line += f" ({m} Amazon)"
+    shown = [f"{v} {k}" for k, v in parts if v]
+    if shown: line += " (" + ", ".join(shown) + ")"
     if prev is not None: line += f" · {_chg(n, prev, money=False)}"
     return line
 def _week_totals(orders, cogs):
