@@ -34,7 +34,12 @@ class ProductLabelsTests(unittest.TestCase):
 
     def test_ultimate_gift_set_expands_into_its_five_books(self):
         labels = sorted(costs.product_labels(li("The GOAT Series Ultimate Gift Set - 5 Kids Sports Books - Mikey The GOAT Plush, Coloring Book, Stickers, Temporary Tattoos & Tote Bag")))
-        self.assertEqual(labels, ["Babe Ruth", "Lionel Messi", "Michael Jordan", "Tom Brady", "Wayne Gretzky"])
+        self.assertEqual(labels, ["Babe Ruth", "Coloring book", "Lionel Messi", "Michael Jordan",
+                                  "Mikey plush", "Tom Brady", "Wayne Gretzky"])
+
+    def test_baby_gift_set_expands_into_bath_book_and_plush(self):
+        labels = sorted(costs.product_labels(li("The GOAT Legends Baby Gift Set - Sports Bath Book & Mikey The GOAT Plush")))
+        self.assertEqual(labels, ["Bath book", "Mikey plush"])
 
     def test_big_four_bundle_expands(self):
         labels = sorted(costs.product_labels(li("GOAT Academy: The Big Four Bundle")))
@@ -56,8 +61,12 @@ class ProductLabelsTests(unittest.TestCase):
         self.assertEqual(costs.product_labels(li("Stuffed Animal - Mikey")), ["Mikey plush"])
 
     def test_unmapped_line_uses_its_title(self):
+        self.assertEqual(costs.product_labels(li("GOAT Series sticker pack")),
+                         ["GOAT Series sticker pack"])
+
+    def test_bath_book_gets_short_label(self):
         self.assertEqual(costs.product_labels(li("Bath Time with The G.O.A.T. Legends bath book")),
-                         ["Bath Time with The G.O.A.T. Legends bath book"])
+                         ["Bath book"])
 
 class UnitsTallyTests(unittest.TestCase):
     def test_tally_expands_bundles_and_skips_cancelled(self):
@@ -99,12 +108,15 @@ class UnitsLineTests(unittest.TestCase):
     def test_line_none_when_nothing_sold(self):
         self.assertIsNone(report._units_line([], []))
 
-    def test_line_caps_long_lists(self):
-        web = [order([li(f"Unmapped Product {i}", 1)]) for i in range(15)]
+    def test_line_shows_only_books_and_listed_extras(self):
+        web = [order([li("Tom Brady, The GOAT", 1), li("GOAT Series tote bag", 1),
+                      li("GOAT Series sticker pack", 2), li("Some random SKU-123", 1)])]
         line = report._units_line(web, [])
-        self.assertIn("+5 more", line)
-        self.assertTrue(line.endswith("· +5 more"))
-        self.assertEqual(len(line.split("\n")), 12)     # header + 10 products + more line
+        self.assertEqual(line, "\U0001f9e9 Sold:\n\u00b7 Tom Brady x1")
+
+    def test_line_none_when_only_unlisted_products_sold(self):
+        web = [order([li("GOAT Series sticker pack", 3)])]
+        self.assertIsNone(report._units_line(web, []))
 
 class EtsyProductUnitsTests(unittest.TestCase):
     def test_receipts_expand_like_website(self):

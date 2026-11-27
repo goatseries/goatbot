@@ -315,6 +315,31 @@
     "Tom Brady",
     "Tiger Woods"
   ],
+  "bundle_extras": {
+    "ultimate gift set 5": [
+      "Coloring book",
+      "Mikey plush"
+    ],
+    "ultimate gift set 4": [
+      "Mikey plush"
+    ],
+    "ultimate gift set": [
+      "Coloring book",
+      "Mikey plush"
+    ],
+    "baby gift set": [
+      "Bath book",
+      "Mikey plush"
+    ]
+  },
+  "units_labels": {
+    "bath time": "Bath book"
+  },
+  "units_extra_labels": [
+    "Coloring book",
+    "Mikey plush",
+    "Bath book"
+  ],
   "bundle_components": {
     "ultimate gift set 5": [
       "Michael Jordan",

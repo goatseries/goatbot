@@ -380,6 +380,9 @@ def _units_line(web, mp, extra=None, cap=10):
         for lab, n in extra:
             if n: u[lab] = u.get(lab, 0) + n
     if not u: return None
+    keep = set(costs.load_config().get("authors", [])) | set(costs.load_config().get("units_extra_labels", []))
+    u = {k: v for k, v in u.items() if k in keep}
+    if not u: return None
     top = sorted(u.items(), key=lambda kv: (-kv[1], kv[0]))
     lines = ["\U0001f9e9 Sold:"] + [f"· {k} x{v}" for k, v in top[:cap]]
     if len(top) > cap: lines.append(f"· +{len(top) - cap} more")
