@@ -28,9 +28,29 @@ class ProductLabelsTests(unittest.TestCase):
         self.assertEqual(labels, ["Michael Jordan", "Tom Brady"])
 
     def test_unknown_bundle_counts_as_itself(self):
-        # Champions Bundle has books_per_unit but no bundle_components entry
-        labels = costs.product_labels(li("Champions Bundle"))
-        self.assertEqual(labels, ["Champions Bundle"])
+        # a bundle whose contents costs.json does not know
+        labels = costs.product_labels(li("Mystery Duo Bundle"))
+        self.assertEqual(labels, ["Mystery Duo Bundle"])
+
+    def test_ultimate_gift_set_expands_into_its_five_books(self):
+        labels = sorted(costs.product_labels(li("The GOAT Series Ultimate Gift Set - 5 Kids Sports Books - Mikey The GOAT Plush, Coloring Book, Stickers, Temporary Tattoos & Tote Bag")))
+        self.assertEqual(labels, ["Babe Ruth", "Lionel Messi", "Michael Jordan", "Tom Brady", "Wayne Gretzky"])
+
+    def test_big_four_bundle_expands(self):
+        labels = sorted(costs.product_labels(li("GOAT Academy: The Big Four Bundle")))
+        self.assertEqual(labels, ["Babe Ruth", "Michael Jordan", "Tom Brady", "Wayne Gretzky"])
+
+    def test_champions_bundle_expands_into_three_books(self):
+        labels = sorted(costs.product_labels(li("GOAT Academy: Champions Bundle")))
+        self.assertEqual(labels, ["Babe Ruth", "Tiger Woods", "Wayne Gretzky"])
+
+    def test_changed_the_game_bundle_expands(self):
+        labels = sorted(costs.product_labels(li("GOAT Academy: Changed The Game Bundle")))
+        self.assertEqual(labels, ["Babe Ruth", "Michael Jordan", "Tiger Woods", "Wayne Gretzky"])
+
+    def test_champions_bundle_counts_three_books(self):
+        orders = [order([li("GOAT Academy: Champions Bundle", 2)])]
+        self.assertEqual(report._book_units(orders), 6)
 
     def test_plush_uses_short_label(self):
         self.assertEqual(costs.product_labels(li("Stuffed Animal - Mikey")), ["Mikey plush"])

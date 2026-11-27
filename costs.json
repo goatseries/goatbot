@@ -53,12 +53,12 @@
       "unit_cost": 5.4
     },
     {
-      "name": "Champions Bundle (4 books)",
+      "name": "Champions Bundle (3 books)",
       "title_contains": [
         "champions bundle"
       ],
       "type": "bundle",
-      "books_per_unit": 4,
+      "books_per_unit": 3,
       "unit_cost": 5.4
     },
     {
@@ -316,6 +316,43 @@
     "Tiger Woods"
   ],
   "bundle_components": {
+    "ultimate gift set 5": [
+      "Michael Jordan",
+      "Babe Ruth",
+      "Lionel Messi",
+      "Wayne Gretzky",
+      "Tom Brady"
+    ],
+    "ultimate gift set 4": [
+      "Michael Jordan",
+      "Serena Williams",
+      "Lionel Messi",
+      "Tom Brady"
+    ],
+    "ultimate gift set": [
+      "Michael Jordan",
+      "Babe Ruth",
+      "Lionel Messi",
+      "Wayne Gretzky",
+      "Tom Brady"
+    ],
+    "big four": [
+      "Michael Jordan",
+      "Babe Ruth",
+      "Tom Brady",
+      "Wayne Gretzky"
+    ],
+    "champions": [
+      "Babe Ruth",
+      "Tiger Woods",
+      "Wayne Gretzky"
+    ],
+    "changed the game": [
+      "Michael Jordan",
+      "Babe Ruth",
+      "Tiger Woods",
+      "Wayne Gretzky"
+    ],
     "jordan brady": [
       "Michael Jordan",
       "Tom Brady"
