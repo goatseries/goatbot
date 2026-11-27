@@ -58,9 +58,17 @@ def _keystring():
     return k
 
 
+def _shared_secret():
+    s = os.environ.get('ETSY_SHARED_SECRET', '').strip()
+    if not s:
+        raise RuntimeError('ETSY_SHARED_SECRET missing')
+    return s
+
+
 def api_key_header():
-    """x-api-key for every Etsy call. Documented form is the bare keystring."""
-    return _keystring()
+    """x-api-key for every Etsy call. Etsy 403s authenticated reads with the bare
+    keystring; the working form is keystring:sharedsecret (verified 2026-11-27)."""
+    return _keystring() + ':' + _shared_secret()
 
 
 def enabled():
