@@ -67,6 +67,15 @@ class UnitsLineTests(unittest.TestCase):
         self.assertIn("Coloring book x3", line)          # 2 Amazon + 1 Etsy
         self.assertNotIn("Bath book", line)
 
+    def test_each_product_on_its_own_line(self):
+        web = [order([li("Tom Brady, The GOAT", 3), li("The G.O.A.T. Legends Coloring Book", 2)]),
+               order([li("Jordan & Brady 2-Book Bundle", 1)])]
+        line = report._units_line(web, [])
+        lines = line.split("\n")
+        self.assertEqual(lines[0], "🧩 Sold:")
+        self.assertEqual(lines[1:], ["· Tom Brady x4", "· Coloring book x2",
+                                     "· Michael Jordan x1"])
+
     def test_line_none_when_nothing_sold(self):
         self.assertIsNone(report._units_line([], []))
 
@@ -74,6 +83,8 @@ class UnitsLineTests(unittest.TestCase):
         web = [order([li(f"Unmapped Product {i}", 1)]) for i in range(15)]
         line = report._units_line(web, [])
         self.assertIn("+5 more", line)
+        self.assertTrue(line.endswith("· +5 more"))
+        self.assertEqual(len(line.split("\n")), 12)     # header + 10 products + more line
 
 class EtsyProductUnitsTests(unittest.TestCase):
     def test_receipts_expand_like_website(self):

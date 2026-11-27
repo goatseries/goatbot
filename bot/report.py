@@ -369,7 +369,7 @@ def _units_tally(orders):
             except Exception as e: print("units line skipped a line: " + type(e).__name__)
     return out
 def _units_line(web, mp, extra=None, cap=10):
-    """'🧩 Sold: Tom Brady x3 · Coloring book x2 · ...' across website + Amazon/Walmart + extra
+    """One line per product under '🧩 Sold:' across website + Amazon/Walmart + extra
     (Etsy) units, or None when nothing sold. Same order sets as the books line."""
     g = costs.split_by_marketplace(mp)
     u = _units_tally(web)
@@ -381,9 +381,9 @@ def _units_line(web, mp, extra=None, cap=10):
             if n: u[lab] = u.get(lab, 0) + n
     if not u: return None
     top = sorted(u.items(), key=lambda kv: (-kv[1], kv[0]))
-    line = "\U0001f9e9 Sold: " + " · ".join(f"{k} x{v}" for k, v in top[:cap])
-    if len(top) > cap: line += f" · +{len(top) - cap} more"
-    return line
+    lines = ["\U0001f9e9 Sold:"] + [f"· {k} x{v}" for k, v in top[:cap]]
+    if len(top) > cap: lines.append(f"· +{len(top) - cap} more")
+    return "\n".join(lines)
 def _week_totals(orders, cogs):
     """Same math as scoreboard(): paid/partially refunded, tax excluded, real fees, label table, wholesale already removed."""
     t = dict(revenue=0.0, fees=0.0, cogs=0.0, shipping=0.0, returns=0.0); n = 0; prods = {}; books = {}; unexp = {}
