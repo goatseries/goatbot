@@ -151,7 +151,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Cache-Control', 'no-store')
         self.send_header('Referrer-Policy', 'same-origin')
         self.send_header('X-Content-Type-Options', 'nosniff')
-        self.send_header('Content-Security-Policy', "default-src 'none'; form-action 'self' https://business-api.tiktok.com; frame-ancestors 'none'")
+        self.send_header('Content-Security-Policy', "default-src 'none'; form-action 'self' https://business-api.tiktok.com https://www.etsy.com; frame-ancestors 'none'")
         if cookie:
             self.send_header('Set-Cookie', cookie)
         if location:
