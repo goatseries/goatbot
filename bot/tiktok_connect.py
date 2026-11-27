@@ -15,6 +15,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlencode, urlparse, parse_qs
 import requests
+from . import etsy_connect
 
 SERVER = 'https://business-api.tiktok.com/open_mcp/tt-ads-mcp-layer'
 DISCOVERY = SERVER + '/oauth/.well-known/openid-configuration'
@@ -183,6 +184,8 @@ class Handler(BaseHTTPRequestHandler):
             elif parsed.path == '/tiktok/connected':
                 self._headers()
                 self.wfile.write(b'TikTok authorization received. Account and spend verification is next. Reporting is not enabled yet. You can close this page.')
+            elif parsed.path.startswith('/etsy/'):
+                etsy_connect.handle_get(self, parsed)
             else:
                 self._headers(404)
                 self.wfile.write(b'Not found')
@@ -192,6 +195,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urlparse(self.path)
+        if parsed.path.startswith('/etsy/'):
+            etsy_connect.handle_post(self, parsed)
+            return
         if not parsed.path.startswith('/tiktok/connect/') or parsed.query or len(self.path) > 256:
             self._headers(405)
             return
@@ -241,11 +247,23 @@ class BoundedServer(ThreadingHTTPServer):
 
 
 def start():
-    """Bind first; discover/register off the reporting thread. Fail closed."""
+    """Bind first; discover/register off the reporting thread. Fail closed.
+    The listener also serves /etsy/* when Etsy is enabled, so bind when either is on."""
     global _http, _ready, _meta
     _ready = False
     _meta = None
     if os.environ.get('TIKTOK_CONNECT_ENABLED') != '1':
+        etsy_connect.start()
+        if not etsy_connect.enabled():
+            return
+        # Etsy on, TikTok off: still bind the shared listener for /etsy/*.
+        try:
+            port = int(os.environ.get('PORT', '8080'))
+            _http = BoundedServer(('0.0.0.0', port), Handler)
+            threading.Thread(target=_http.serve_forever, daemon=True).start()
+        except Exception:
+            _http = None
+            print('connection listener failed; existing reporting continues')
         return
     try:
         port = int(os.environ.get('PORT', '8080'))
@@ -267,3 +285,4 @@ def start():
                 _meta = None
                 print('TikTok connection configuration failed; reporting remains disabled')
         threading.Thread(target=setup, daemon=True).start()
+    etsy_connect.start()  # shares this listener via the /etsy/* routes; fails closed on its own

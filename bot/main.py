@@ -1,7 +1,7 @@
 import time, json, os, re
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
-from . import config as c, shopify, telegram, report, costs, tiktok_connect
+from . import config as c, shopify, telegram, report, costs, tiktok_connect, etsy, etsy_connect
 STATE = os.environ.get("STATE_PATH", "state.json")  # use a Railway volume for persistence
 def redact(msg):
     for k in ("TELEGRAM_BOT_TOKEN", "SHOPIFY_ADMIN_TOKEN", "SHOPIFY_CLIENT_SECRET", "SHOPIFY_CLIENT_ID", "META_ACCESS_TOKEN", "KLAVIYO_API_KEY"):
@@ -20,6 +20,33 @@ def load():
     except Exception: s = {}
     s.setdefault("alerted", []); s.setdefault("recheck", {}); s.setdefault("seen", []); s.setdefault("pending", []); s.setdefault("last_poll", None); s.setdefault("sent_slots", [])
     return s
+def etsy_poll(s, max_age_h):
+    """Etsy receipts touched since the last check. Alerts only fresh paid receipts by their
+    original sale time, seeds everything else silently; first-ever run seeds without alerts.
+    Failures never touch Shopify reporting: the caller catches everything."""
+    es = s.setdefault("etsy", {"last_poll": None, "seen": [], "alerted": []})
+    fresh_etsy = not es["last_poll"]
+    now = datetime.now(timezone.utc)
+    # First-ever poll seeds only a short recent window (full history would page thousands of
+    # receipts every cycle); anything older is picked up later only if it changes.
+    if es["last_poll"]:
+        since = (datetime.fromisoformat(es["last_poll"]) - timedelta(minutes=5)).timestamp()
+    else:
+        since = (now - timedelta(hours=max(max_age_h, 48))).timestamp()
+    for r in etsy.modified_since(since):
+        rid = r["receipt_id"]
+        if rid in es["alerted"]:
+            continue
+        age_h = (now - r["created"]).total_seconds() / 3600
+        if not fresh_etsy and 0 <= age_h <= max_age_h:
+            alert_send(etsy.sale_message(r))
+            es["alerted"].append(rid)
+            print(f"alert (etsy): receipt {rid} sold {r['created'].isoformat()}")
+        elif rid not in es["seen"]:
+            es["seen"].append(rid)
+            if not fresh_etsy: print(f"seeded (no alert): etsy receipt {rid} sold {r['created'].isoformat()}")
+    es["seen"] = es["seen"][-2000:]; es["alerted"] = es["alerted"][-2000:]
+    es["last_poll"] = now.isoformat()
 def save(s):
     """Atomic write: temp file in the same directory, fsync, rename."""
     tmp = STATE + ".tmp"
@@ -128,6 +155,9 @@ def main():
                 if d in ("alert", "seed"):
                     first_seen = record_sale_decision(o, s, d, max_age_h)
                     if d == "seed" and first_seen: print(f"seeded (no alert): order {o.get('name')} status {o.get('displayFinancialStatus')} created {o.get('createdAt')} updated {o.get('updatedAt')}")
+            if etsy.available():
+                try: etsy_poll(s, max_age_h)
+                except Exception as e: print("etsy poll error:", redact(type(e).__name__))
             s["alerted"] = s["alerted"][-5000:]
             s["seen"] = s["seen"][-5000:]; s["pending"] = s["pending"][-500:]
             s["last_poll"] = datetime.now(timezone.utc).isoformat()
@@ -148,7 +178,15 @@ def main():
                     print("weekly recap error:", redact(type(e).__name__ + ": " + str(e))); s["weekly_retry_after"] = time.time() + 600
             s["tg_offset"], reqs = telegram.commands(s.get("tg_offset", 0))
             for chat_id, p_ in reqs:
-                if p_ == "tiktokconnect":
+                if p_ == "etsyconnect":
+                    if str(chat_id) != str(telegram._chat_id()) or not isinstance(chat_id, int) or chat_id <= 0:
+                        continue  # Never publish a connection capability in a group.
+                    try:
+                        link = etsy_connect.new_link()
+                        telegram.send("Connect Etsy to goatbot: " + link + "\nThis private link expires in 15 minutes. Goatbot will read shop and order data only; nothing is listed or changed. Reporting begins after the first orders are verified.", chat_id=chat_id)
+                    except Exception:
+                        telegram.send("Etsy connection is not configured yet. Existing reporting is unchanged.", chat_id=chat_id)
+                elif p_ == "tiktokconnect":
                     if str(chat_id) != str(telegram._chat_id()) or not isinstance(chat_id, int) or chat_id <= 0:
                         continue  # Never publish a connection capability in a group.
                     try:

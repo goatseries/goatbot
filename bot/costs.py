@@ -188,6 +188,20 @@ def components(li, cfg=None):
     for k, v in cfg.get("bundle_components", {}).items():
         if norm(k) in blob: return v
     return None
+def product_labels(li, cfg=None):
+    """The individual products one line item expands into, for the per-product units list.
+    A standalone book counts under its author; a known bundle expands into its component
+    books; anything else (coloring book, tote, plush, bath book, bundles whose contents
+    costs.json does not know) counts under its own name - never as a book."""
+    cfg = load_config() if cfg is None else cfg
+    a = author_of(li, cfg)
+    if a: return [a]
+    comp = components(li, cfg)
+    if comp: return comp
+    it = classify(li, cfg)
+    if it and it.get("type") not in (None, "book", "bundle", "gift_set"):
+        return [it.get("label") or it.get("name") or display(li) or "?"]
+    return [display(li) or (it or {}).get("name") or "?"]
 def _is_ws_line(li, w):
     sku = ((li.get("sku") or (li.get("variant") or {}).get("sku")) or "").strip()
     blob = " ".join(fields(li)[1])

@@ -3,7 +3,7 @@ from zoneinfo import ZoneInfo
 import os
 import math
 from .version import VERSION
-from . import config as c, shopify, meta, costs, klaviyo, tiktok
+from . import config as c, shopify, meta, costs, klaviyo, tiktok, etsy
 def _utm(o):
     v = ((o.get("customerJourneySummary") or {}).get("lastVisit") or {}).get("utmParameters") or {}
     return v
@@ -134,6 +134,17 @@ def _mp_cohort(start, end):
         d = _valid_pa(o, tz)
         if d is not None and d >= start and (end is None or d < end): out.append(o)
     return out
+def _etsy_cohort(start, end):
+    """Etsy summary for the window, or None when Etsy is not connected (stay silent).
+    A connected-but-failed read is reported, never zeroed."""
+    if not etsy.available(): return None
+    try:
+        s = etsy.summary(start, end)
+        return {"ok": True, **s}
+    except Exception as e:
+        print("etsy report error: " + type(e).__name__)
+        return {"ok": False}
+
 def _ad_totals(start, end, now):
     """Separate reported sources; unknown spend never becomes zero."""
     result = {"meta": None, "tiktok": None, "total": None, "note": ""}
@@ -223,13 +234,20 @@ def scoreboard(period="t"):
     roas_text = f" · ROAS {roas:.2f}x" if roas is not None else (" · ROAS unavailable" if ads is not None else "")
     subs = _subs_line(period, start, end, now)
     mp_line = _compact_marketplace(mp)
+    ets = _etsy_cohort(start, end + timedelta(seconds=1) if end else None)
     warning = "\n⚠️ Marketplace dates incomplete" if undated else ""
+    etsy_line = ""
+    if ets is not None:
+        if ets["ok"] and ets["orders"]: etsy_line = f"\n🛒 Etsy revenue ${ets['revenue']:,.0f}"
+        elif not ets["ok"]: warning += "\n⚠️ Etsy data unavailable"
+    units = _units_line(os_, mp, extra=ets["units"].items() if ets and ets["ok"] else None)
     return (f"📊 {label} · {now.strftime('%-I:%M %p')} ET\n"
         f"💰 {profit_line}\n💵 Website sales ${t['revenue']:,.0f}{roas_text}\n"
         f"💸 {_spend_line(ad)}\n🧾 Costs ${costs_total:,.0f} · 💳 Orders {len(os_)}\n"
         f"🎵 TikTok sales ${tt_revenue:,.0f} (included)\n"
-        f"{_books_line(os_, mp)}"
-        f"{subs}" + ("\n" + mp_line if mp_line else "") + warning)
+        f"{_books_line(os_, mp, extra=[('Etsy', ets['books'])] if ets and ets['ok'] else None)}"
+        + ("\n" + units if units else "") +
+        f"{subs}" + ("\n" + mp_line if mp_line else "") + etsy_line + warning)
 def creative_report(days=7):
     tz = ZoneInfo(c.TZ); end = datetime.now(tz); start = end - timedelta(days=days - 1)
     os_ = shopify.orders((start.replace(hour=0, minute=0, second=0).astimezone(ZoneInfo("UTC"))).strftime("%Y-%m-%dT%H:%M:%SZ"))
@@ -327,13 +345,44 @@ def _book_units(orders):
                 total += n * q
             except Exception as e: print("books line skipped a line: " + type(e).__name__)
     return total
-def _books_line(web, mp, prev=None):
+def _books_line(web, mp, prev=None, extra=None):
     g = costs.split_by_marketplace(mp)
-    w = _book_units(web); parts = [(k, _book_units(g[k])) for k in ("Amazon", "Walmart") if k in g]; n = w + sum(v for _, v in parts)
+    w = _book_units(web); parts = [(k, _book_units(g[k])) for k in ("Amazon", "Walmart") if k in g]
+    if extra: parts += [(k, v) for k, v in extra if v]
+    n = w + sum(v for _, v in parts)
     line = f"\U0001f4da Books sold {n}"
     shown = [f"{v} {k}" for k, v in parts if v]
     if shown: line += " (" + ", ".join(shown) + ")"
     if prev is not None: line += f" · {_chg(n, prev, money=False)}"
+    return line
+def _units_tally(orders):
+    """Individual product -> units sold over order dicts (website or marketplace).
+    Known bundles expand into their component books; coloring books and other
+    non-book items count under their own product name, never as books."""
+    cfg = costs.load_config(); out = {}
+    for o in orders:
+        if o.get("cancelledAt"): continue
+        for li in (o.get("lineItems") or {}).get("nodes") or []:
+            try:
+                q = int(li["quantity"])
+                for lab in costs.product_labels(li, cfg): out[lab] = out.get(lab, 0) + q
+            except Exception as e: print("units line skipped a line: " + type(e).__name__)
+    return out
+def _units_line(web, mp, extra=None, cap=10):
+    """'🧩 Sold: Tom Brady x3 · Coloring book x2 · ...' across website + Amazon/Walmart + extra
+    (Etsy) units, or None when nothing sold. Same order sets as the books line."""
+    g = costs.split_by_marketplace(mp)
+    u = _units_tally(web)
+    for k in ("Amazon", "Walmart"):
+        if k in g:
+            for lab, n in _units_tally(g[k]).items(): u[lab] = u.get(lab, 0) + n
+    if extra:
+        for lab, n in extra:
+            if n: u[lab] = u.get(lab, 0) + n
+    if not u: return None
+    top = sorted(u.items(), key=lambda kv: (-kv[1], kv[0]))
+    line = "\U0001f9e9 Sold: " + " · ".join(f"{k} x{v}" for k, v in top[:cap])
+    if len(top) > cap: line += f" · +{len(top) - cap} more"
     return line
 def _week_totals(orders, cogs):
     """Same math as scoreboard(): paid/partially refunded, tax excluded, real fees, label table, wholesale already removed."""
@@ -373,6 +422,7 @@ def weekly_recap():
         t_["roas"] = t_["revenue"] / t_["ads"] if t_["ads"] else None
         t_["roi"] = t_["profit"] / (t_["ads"] + t_["costs"]) * 100 if t_["ads"] is not None and (t_["ads"] + t_["costs"]) else 0
     subs = [klaviyo.new_profiles(w1.astimezone(utc), mon.astimezone(utc)), klaviyo.new_profiles(w0.astimezone(utc), w1.astimezone(utc))]
+    ets_wk, ets_prev = _etsy_cohort(w1, mon), _etsy_cohort(w0, w1)
     rng = lambda s_, e_: f"{s_.strftime('%b %-d')}-{e_.strftime('%b %-d')}"
     complete = a['ads'] is not None and b['ads'] is not None
     roas_fmt = lambda value: f"{value:.2f}x" if value is not None else "unavailable"
@@ -380,15 +430,23 @@ def weekly_recap():
         f"💰 Profit ${a['profit']:,.0f} · ROI {a['roi']:.1f}% · {_chg(a['profit'], b['profit'], plain=True)}",
         f"🎯 ROAS {roas_fmt(a['roas'])} · prev {roas_fmt(b['roas'])}"] if complete else ["💰 Profit / ROI / ROAS comparison unavailable: ad spend missing"]
     tt_revenue, tt_orders = _tagged_tiktok([o for o in allo if w1 <= created(o) < mon], cogs)
+    uw = _units_line([o for o in allo if w1 <= created(o) < mon], mp_wk,
+                     extra=ets_wk["units"].items() if ets_wk and ets_wk["ok"] else None)
     L = [f"📅 {rng(w1, mon - timedelta(days=1))} · vs {rng(w0, w1 - timedelta(days=1))}"] + financial + [
          f"💵 Website sales ${a['revenue']:,.0f} · {_chg(a['revenue'], b['revenue'])}",
          "💸 " + _spend_line(a['ad']),
          f"🧾 Costs ${a['costs']:,.0f} · {_chg(a['costs'], b['costs'])}",
          f"💳 Orders {a['orders']} · {_chg(a['orders'], b['orders'], money=False)}",
-         _books_line([o for o in allo if w1 <= created(o) < mon], mp_wk, _book_units([o for o in allo if w0 <= created(o) < w1]) + _book_units(mp_prev)),
+         _books_line([o for o in allo if w1 <= created(o) < mon], mp_wk,
+                     _book_units([o for o in allo if w0 <= created(o) < w1]) + _book_units(mp_prev) + (ets_prev["books"] if ets_prev and ets_prev["ok"] else 0),
+                     extra=[("Etsy", ets_wk["books"])] if ets_wk and ets_wk["ok"] else None),
+         *([uw] if uw else []),
          f"🎵 TikTok sales ${tt_revenue:,.0f} (included)"]
     _ml = _compact_marketplace(mp_wk)
     if _ml: L.append(_ml)
+    if ets_wk is not None:
+        if ets_wk["ok"] and ets_wk["orders"]: L.append(f"🛒 Etsy revenue ${ets_wk['revenue']:,.0f}")
+        elif not ets_wk["ok"]: L.append("⚠️ Etsy data unavailable")
     if subs[0] is not None and subs[1] is not None: L.append(f"📧 New contacts {subs[0]} · {_chg(subs[0], subs[1], money=False)}")
     elif subs[0] is not None: L.append(f"📧 New contacts {subs[0]}")
     view = os.environ.get("TOP_VIEW", "books").lower()

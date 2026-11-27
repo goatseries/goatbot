@@ -123,7 +123,8 @@
       ],
       "type": "stuffy",
       "unit_cost": 8.0,
-      "ships_ground": true
+      "ships_ground": true,
+      "label": "Mikey plush"
     },
     {
       "name": "Coloring book",
